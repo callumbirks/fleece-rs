@@ -1,0 +1,19 @@
+[package]
+name = "fleece"
+version = "0.1.0"
+edition = "2021"
+
+[profile.release]
+codegen-units = 1
+
+[profile.bench]
+debug = true
+
+[dependencies]
+
+[dev-dependencies]
+criterion = { version = "0.5.1" }
+
+[[bench]]
+name = "fleece_bench"
+harness = false
