@@ -34,6 +34,11 @@ impl<'a> Iterator for DictIterator<'a> {
         let val = Value::from_raw(self.raw.next()?)?;
         Some((key, val))
     }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        // Dict is an array of key-value pairs, so there are half as many iter items as there are elements
+        (self.raw.len() / 2, Some(self.raw.len() / 2))
+    }
 }
 
 impl<'a> IntoIterator for &Dict<'a> {

@@ -22,25 +22,23 @@ pub enum ValueType {
 
 const VARINT_MAX_LEN: usize = 10;
 
-#[repr(u8)]
-pub enum Tag {
-    Special = 0x30,
-    Short = 0x00,
-    Int = 0x10,
-    Float = 0x20,
-    String = 0x40,
-    Data = 0x50,
-    Array = 0x60,
-    Dict = 0x70,
-    Pointer = 0x80,
+mod tag {
+    pub const SHORT: u8 = 0x00;
+    pub const INT: u8 = 0x10;
+    pub const FLOAT: u8 = 0x20;
+    pub const SPECIAL: u8 = 0x30;
+    pub const STRING: u8 = 0x40;
+    pub const DATA: u8 = 0x50;
+    pub const ARRAY: u8 = 0x60;
+    pub const DICT: u8 = 0x70;
+    pub const POINTER: u8 = 0x80;
 }
 
-#[repr(u8)]
-pub enum Special {
-    Null = 0x00,
-    Undefined = 0x0C,
-    False = 0x04,
-    True = 0x08,
+mod special_tag {
+    pub const NULL: u8 = 0x00;
+    pub const UNDEFINED: u8 = 0x0C;
+    pub const FALSE: u8 = 0x04;
+    pub const TRUE: u8 = 0x08;
 }
 
 impl ValueType {
@@ -48,31 +46,31 @@ impl ValueType {
     pub fn from_byte(byte: u8) -> Self {
         match byte & 0xF0 {
             // Some types have extra info in the lower 4 bits
-            x if x == Tag::Special as u8 => match byte & 0x0F {
-                y if y == Special::Null as u8 => ValueType::Null,
-                y if y == Special::Undefined as u8 => ValueType::Undefined,
-                y if y == Special::False as u8 => ValueType::False,
-                y if y == Special::True as u8 => ValueType::True,
+            tag::SPECIAL => match byte & 0x0F {
+                special_tag::NULL => ValueType::Null,
+                special_tag::UNDEFINED => ValueType::Undefined,
+                special_tag::FALSE => ValueType::False,
+                special_tag::TRUE => ValueType::True,
                 _ => ValueType::Null,
             },
             // 0x08 is the sign bit
-            x if x == Tag::Short as u8 => match byte & 0x08 {
+            tag::SHORT => match byte & 0x08 {
                 0x00 => ValueType::Short,
                 _ => ValueType::UnsignedShort,
             },
-            x if x == Tag::Int as u8 => match byte & 0x08 {
+            tag::INT => match byte & 0x08 {
                 0x00 => ValueType::Int,
                 _ => ValueType::UnsignedInt,
             },
             // For floats, the sign bit signifies the type is double
-            x if x == Tag::Float as u8 => match byte & 0x08 {
+            tag::FLOAT => match byte & 0x08 {
                 0x00 => ValueType::Float,
                 _ => ValueType::Double,
             },
-            x if x == Tag::String as u8 => ValueType::String,
-            x if x == Tag::Data as u8 => ValueType::Data,
-            x if x == Tag::Array as u8 => ValueType::Array,
-            x if x == Tag::Dict as u8 => ValueType::Dict,
+            tag::STRING => ValueType::String,
+            tag::DATA => ValueType::Data,
+            tag::ARRAY => ValueType::Array,
+            tag::DICT => ValueType::Dict,
             // Pointers are 0x80 to 0xF0, so we don't compare directly to Tag::Pointer
             _ => ValueType::Pointer,
         }
@@ -82,10 +80,10 @@ impl ValueType {
 pub mod constants {
     use super::*;
 
-    pub const TRUE: [u8; 2] = [Tag::Special as u8 | Special::True as u8, 0x00];
-    pub const FALSE: [u8; 2] = [Tag::Special as u8 | Special::False as u8, 0x00];
-    pub const NULL: [u8; 2] = [Tag::Special as u8 | Special::Null as u8, 0x00];
-    pub const UNDEFINED: [u8; 2] = [Tag::Special as u8 | Special::Undefined as u8, 0x00];
+    pub const TRUE: [u8; 2] = [tag::SPECIAL as u8 | special_tag::TRUE as u8, 0x00];
+    pub const FALSE: [u8; 2] = [tag::SPECIAL as u8 | special_tag::FALSE as u8, 0x00];
+    pub const NULL: [u8; 2] = [tag::SPECIAL as u8 | special_tag::NULL as u8, 0x00];
+    pub const UNDEFINED: [u8; 2] = [tag::SPECIAL as u8 | special_tag::UNDEFINED as u8, 0x00];
 }
 
 #[repr(transparent)]

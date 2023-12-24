@@ -14,8 +14,8 @@ impl<'a> Array<'a> {
         }
     }
 
-    fn get(&self, index: usize) -> Option<Value<'a>> {
-        Value::from_raw(unsafe { self.raw.get(index)? })
+    pub fn get(&self, index: usize) -> Option<Value<'a>> {
+        Value::from_raw(self.raw.get(index)?)
     }
 }
 
@@ -28,7 +28,11 @@ impl<'a> Iterator for ArrayIterator<'a> {
     type Item = Value<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        Value::from_raw(unsafe { self.raw.next()? })
+        Value::from_raw(self.raw.next()?)
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.raw.len(), Some(self.raw.len()))
     }
 }
 

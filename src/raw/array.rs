@@ -57,7 +57,12 @@ impl RawArray {
     pub fn elem_count(&self) -> usize {
         let mut buf = [0_u8; 2];
         buf.copy_from_slice(&self.value.bytes[0..2]);
-        (u16::from_be_bytes(buf) & 0x07FF) as usize
+        let res = (u16::from_be_bytes(buf) & 0x07FF) as usize;
+        if self.value.value_type() == ValueType::Dict {
+            res * 2
+        } else {
+            res
+        }
     }
 }
 
@@ -66,11 +71,7 @@ impl RawArray {
     pub(super) fn validate(&self, data_start: *const u8, data_end: *const u8) -> bool {
         let is_wide = self.is_wide();
         let width: u8 = if is_wide { 4 } else { 2 };
-        let elem_count = if self.value.value_type() == ValueType::Dict {
-            self.elem_count() * 2
-        } else {
-            self.elem_count()
-        };
+        let elem_count = self.elem_count();
 
         let first = unsafe { self.value.bytes.as_ptr().add(2) };
         if (first as usize) + (elem_count * width as usize) > (data_end as usize) {
@@ -104,6 +105,12 @@ pub(crate) struct RawArrayIter<'a> {
     len: usize,
 }
 
+impl RawArrayIter<'_> {
+    pub fn len(&self) -> usize {
+        self.len
+    }
+}
+
 impl<'a> Iterator for RawArrayIter<'a> {
     type Item = &'a RawValue;
 
@@ -126,6 +133,10 @@ impl<'a> Iterator for RawArrayIter<'a> {
 
         Some(val)
     }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.len, Some(self.len))
+    }
 }
 
 impl<'a> IntoIterator for &'a RawArray {
@@ -137,11 +148,7 @@ impl<'a> IntoIterator for &'a RawArray {
             current: unsafe { self.first_unchecked() },
             width: self.width(),
             index: 0,
-            len: if self.value.value_type() == ValueType::Dict {
-                self.elem_count() * 2
-            } else {
-                self.elem_count()
-            },
+            len: self.elem_count(),
         }
     }
 }
