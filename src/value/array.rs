@@ -1,67 +1,34 @@
-use crate::raw::{RawValue, ValueType};
+use crate::raw::{RawArray, RawArrayIter, RawValue};
 
 use super::Value;
 
+#[repr(transparent)]
 pub struct Array<'a> {
-    first: &'a RawValue,
+    raw: &'a RawArray,
 }
 
 impl<'a> Array<'a> {
-    pub fn new(raw: &'a RawValue) -> Self {
-        Self { first: raw }
-    }
-
-    fn width(&self) -> usize {
-        // TODO: sizeof(ValueSlot) for mutable array
-        if self.first.arr_is_wide() {
-            4
-        } else {
-            2
+    pub(crate) fn new(raw: &'a RawValue) -> Self {
+        Self {
+            raw: RawArray::from_value(raw),
         }
     }
 
     fn get(&self, index: usize) -> Option<Value<'a>> {
-        if index >= self.first.arr_len() {
-            return None;
-        }
-        Value::from_raw(unsafe {
-            let val = self.first.offset_unchecked(index as isize, self.width());
-            if val.value_type() == ValueType::Pointer {
-                val.deref_unchecked(self.width())
-            } else {
-                val
-            }
-        })
+        Value::from_raw(unsafe { self.raw.get(index)? })
     }
 }
 
+#[repr(transparent)]
 pub struct ArrayIterator<'a> {
-    current: &'a RawValue,
-    index: usize,
-    pub width: usize,
-    // The number of elements in the array
-    pub len: usize,
+    raw: RawArrayIter<'a>,
 }
 
 impl<'a> Iterator for ArrayIterator<'a> {
     type Item = Value<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.index + 1 > self.len {
-            return None;
-        }
-        self.current = unsafe {
-            self.current
-                .offset_unchecked(self.width as isize, self.width)
-        };
-        self.index += 1;
-        Value::from_raw(unsafe {
-            if self.current.value_type() == ValueType::Pointer {
-                self.current.deref_unchecked(self.width)
-            } else {
-                self.current
-            }
-        })
+        Value::from_raw(unsafe { self.raw.next()? })
     }
 }
 
@@ -71,10 +38,7 @@ impl<'a> IntoIterator for &Array<'a> {
 
     fn into_iter(self) -> Self::IntoIter {
         ArrayIterator {
-            current: self.first,
-            index: 0,
-            width: self.width(),
-            len: self.first.arr_len(),
+            raw: self.raw.into_iter(),
         }
     }
 }

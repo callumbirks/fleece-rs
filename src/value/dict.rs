@@ -1,83 +1,37 @@
-use crate::raw::{RawValue, ValueType};
+use crate::raw::{RawArray, RawArrayIter, RawValue};
 
 use super::Value;
 
+#[repr(transparent)]
 pub struct Dict<'a> {
-    first: &'a RawValue,
+    raw: &'a RawArray,
 }
 
 impl<'a> Dict<'a> {
-    pub fn new(raw: &'a RawValue) -> Self {
-        Self { first: raw }
-    }
-
-    fn width(&self) -> usize {
-        // TODO: sizeof(ValueSlot) for mutable array
-        if self.first.arr_is_wide() {
-            4
-        } else {
-            2
+    pub(crate) fn new(raw: &'a RawValue) -> Self {
+        Self {
+            raw: RawArray::from_value(raw),
         }
     }
 
     pub fn get(&self, index: usize) -> Option<(Value<'a>, Value<'a>)> {
-        if index >= self.first.arr_len() {
-            return None;
-        }
-        let offset = 2 * index as isize * self.width() as isize + self.width() as isize;
-        let key = Value::from_raw(unsafe {
-            let val = self.first.offset_unchecked(offset, self.width());
-            if val.value_type() == ValueType::Pointer {
-                val.deref_unchecked(self.width())
-            } else {
-                val
-            }
-        })?;
-        let val = Value::from_raw(unsafe {
-            let val = self.first.offset_unchecked(offset + self.width() as isize, self.width());
-            if val.value_type() == ValueType::Pointer {
-                val.deref_unchecked(self.width())
-            } else {
-                val
-            }
-        })?;
+        let offset = 2 * index;
+        let key = Value::from_raw(self.raw.get(offset)?)?;
+        let val = Value::from_raw(self.raw.get(offset + 1)?)?;
         Some((key, val))
     }
 }
 
 pub struct DictIterator<'a> {
-    current: &'a RawValue,
-    index: usize,
-    pub width: usize,
-    // The number of key-value pairs in the dictionary
-    pub len: usize,
+    raw: RawArrayIter<'a>,
 }
 
 impl<'a> Iterator for DictIterator<'a> {
     type Item = (Value<'a>, Value<'a>);
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.index + 1 > self.len {
-            return None;
-        }
-        let key = Value::from_raw(unsafe {
-            let val = self.current.offset_unchecked(self.width as isize, self.width);
-            if val.value_type() == ValueType::Pointer {
-                val.deref_unchecked(self.width)
-            } else {
-                val
-            }
-        })?;
-        let val = Value::from_raw(unsafe {
-            let val = self.current.offset_unchecked(2 * self.width as isize, self.width);
-            self.current = val;
-            if val.value_type() == ValueType::Pointer {
-                val.deref_unchecked(self.width)
-            } else {
-                val
-            }
-        })?;
-        self.index += 1;
+        let key = Value::from_raw(self.raw.next()?)?;
+        let val = Value::from_raw(self.raw.next()?)?;
         Some((key, val))
     }
 }
@@ -88,10 +42,7 @@ impl<'a> IntoIterator for &Dict<'a> {
 
     fn into_iter(self) -> Self::IntoIter {
         DictIterator {
-            current: self.first,
-            index: 0,
-            width: self.width(),
-            len: self.first.arr_len(),
+            raw: self.raw.into_iter(),
         }
     }
 }

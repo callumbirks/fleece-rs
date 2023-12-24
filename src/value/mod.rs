@@ -2,7 +2,7 @@ pub use array::Array;
 pub use dict::Dict;
 use std::fmt::{Display, Formatter};
 
-use crate::raw::{RawValue, ValueType};
+use crate::raw::{RawValue, ValueType, self};
 
 mod array;
 mod dict;
@@ -22,30 +22,30 @@ pub enum Value<'a> {
 }
 
 impl<'a> Value<'a> {
-    pub fn from_data(data: &'a [u8]) -> Option<Value<'a>> {
-        let raw_value = RawValue::from_data(data)?;
+    pub fn from_bytes(data: &'a [u8]) -> Option<Value<'a>> {
+        let raw_value = RawValue::from_bytes(data)?;
         Value::from_raw(raw_value)
     }
 
-    pub unsafe fn from_data_unchecked(data: &'a [u8]) -> Option<Value<'a>> {
-        let raw_value = RawValue::from_data_unchecked(data);
+    pub unsafe fn from_bytes_unchecked(data: &'a [u8]) -> Option<Value<'a>> {
+        let raw_value = RawValue::from_bytes_unchecked(data);
         Value::from_raw(raw_value)
     }
 
-    pub(crate) fn from_raw(raw_value: &'a RawValue) -> Option<Value<'a>> {
+    fn from_raw(raw_value: &'a RawValue) -> Option<Value<'a>> {
         match raw_value.value_type() {
             ValueType::Null => Some(Value::Null),
             ValueType::Undefined => Some(Value::Undefined),
             ValueType::True => Some(Value::Bool(true)),
             ValueType::False => Some(Value::Bool(false)),
             ValueType::UnsignedShort | ValueType::UnsignedInt => {
-                Some(Value::Unsigned(raw_value.as_unsigned_int()))
+                Some(Value::Unsigned(raw_value.to_unsigned_int()))
             }
-            ValueType::Short | ValueType::Int => Some(Value::Int(raw_value.as_int())),
-            ValueType::Float => Some(Value::Float(raw_value.as_float())),
-            ValueType::Double => Some(Value::Double(raw_value.as_double())),
-            ValueType::String => Some(Value::String(raw_value.as_str())),
-            ValueType::Data => Some(Value::Data(raw_value.as_data())),
+            ValueType::Short | ValueType::Int => Some(Value::Int(raw_value.to_int())),
+            ValueType::Float => Some(Value::Float(raw_value.to_float())),
+            ValueType::Double => Some(Value::Double(raw_value.to_double())),
+            ValueType::String => Some(Value::String(raw_value.to_str())),
+            ValueType::Data => Some(Value::Data(raw_value.to_data())),
             ValueType::Dict => Some(Value::Dict(Dict::new(raw_value))),
             ValueType::Array => Some(Value::Array(Array::new(raw_value))),
             // RawValue should never be pointer, as pointers are always dereferenced in from_data

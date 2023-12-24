@@ -1,3 +1,4 @@
+mod encoder;
 mod raw;
 mod value;
 

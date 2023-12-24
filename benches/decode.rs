@@ -1,25 +1,25 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
-use fleece::Value;
+use fleece_rs::Value;
 
 const PERSON_ENCODED: &[u8] = include_bytes!("../1person.fleece");
 const PEOPLE_ENCODED: &[u8] = include_bytes!("../1000people.fleece");
 
-fn fleece_decode(c: &mut Criterion) {
+fn decode_people(c: &mut Criterion) {
     c.bench_function("fleece_decode", |b| {
         b.iter(|| {
-            assert!(Value::from_data(black_box(PEOPLE_ENCODED)).is_some());
+            Value::from_bytes(black_box(PEOPLE_ENCODED));
         })
     });
 }
 
-fn fleece_decode_unchecked(c: &mut Criterion) {
+fn decode_people_unchecked(c: &mut Criterion) {
     c.bench_function("fleece_decode_unchecked", |b| {
         b.iter(|| {
-            unsafe { assert!(Value::from_data_unchecked(black_box(PEOPLE_ENCODED)).is_some()) };
+            unsafe { Value::from_bytes_unchecked(black_box(PEOPLE_ENCODED)) };
         })
     });
 }
 
-criterion_group!(benches, fleece_decode, fleece_decode_unchecked);
+criterion_group!(benches, decode_people, decode_people_unchecked);
 criterion_main!(benches);
