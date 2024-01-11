@@ -1,4 +1,4 @@
-use super::{RawValue, ValueType};
+use super::value::{RawValue, ValueType};
 
 /// Internally identical to `RawValue`, this is just used to separate out some functionality.
 #[repr(transparent)]
@@ -7,11 +7,12 @@ pub(super) struct ValuePointer {
 }
 
 impl ValuePointer {
-    pub(super) fn deref(
-        &self,
-        wide: bool,
-        data_start: *const u8,
-    ) -> Option<&RawValue> {
+    #[inline(always)]
+    pub fn from_value(value: &RawValue) -> &Self {
+        unsafe { std::mem::transmute(value) }
+    }
+
+    pub(super) fn deref(&self, wide: bool, data_start: *const u8) -> Option<&RawValue> {
         if wide {
             if self.value.bytes.len() < 4 {
                 return None;
@@ -46,9 +47,7 @@ impl ValuePointer {
         let target = unsafe { RawValue::from_raw_unchecked(target_ptr, offset) };
 
         if target.value_type() == ValueType::Pointer {
-            return target
-                .as_value_ptr()
-                .deref(true, data_start);
+            return ValuePointer::from_value(target).deref(true, data_start);
         } else {
             Some(target)
         }
@@ -68,7 +67,7 @@ impl ValuePointer {
         let target = RawValue::from_raw_unchecked(target_ptr, offset);
 
         if target.value_type() == ValueType::Pointer {
-            return target.as_value_ptr().deref_unchecked(true);
+            return ValuePointer::from_value(target).deref_unchecked(true);
         } else {
             target
         }

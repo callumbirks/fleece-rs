@@ -1,4 +1,4 @@
-use crate::raw::{RawArray, RawArrayIter, RawValue};
+use crate::raw::{array::RawArray, array::RawArrayIter, value::RawValue};
 
 use super::Value;
 

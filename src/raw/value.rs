@@ -1,5 +1,10 @@
-use super::{pointer::ValuePointer, RawArray};
+use super::{array::RawArray, pointer::ValuePointer, varint};
 use std::fmt::{Display, Formatter};
+
+#[repr(transparent)]
+pub struct RawValue {
+    pub(super) bytes: [u8],
+}
 
 #[derive(PartialEq, Eq)]
 pub enum ValueType {
@@ -20,9 +25,7 @@ pub enum ValueType {
     Pointer,
 }
 
-const VARINT_MAX_LEN: usize = 10;
-
-mod tag {
+pub mod tag {
     pub const SHORT: u8 = 0x00;
     pub const INT: u8 = 0x10;
     pub const FLOAT: u8 = 0x20;
@@ -34,7 +37,7 @@ mod tag {
     pub const POINTER: u8 = 0x80;
 }
 
-mod special_tag {
+pub mod special_tag {
     pub const NULL: u8 = 0x00;
     pub const UNDEFINED: u8 = 0x0C;
     pub const FALSE: u8 = 0x04;
@@ -80,15 +83,10 @@ impl ValueType {
 pub mod constants {
     use super::*;
 
-    pub const TRUE: [u8; 2] = [tag::SPECIAL as u8 | special_tag::TRUE as u8, 0x00];
-    pub const FALSE: [u8; 2] = [tag::SPECIAL as u8 | special_tag::FALSE as u8, 0x00];
-    pub const NULL: [u8; 2] = [tag::SPECIAL as u8 | special_tag::NULL as u8, 0x00];
-    pub const UNDEFINED: [u8; 2] = [tag::SPECIAL as u8 | special_tag::UNDEFINED as u8, 0x00];
-}
-
-#[repr(transparent)]
-pub struct RawValue {
-    pub(super) bytes: [u8],
+    pub const TRUE: [u8; 2] = [tag::SPECIAL | special_tag::TRUE, 0x00];
+    pub const FALSE: [u8; 2] = [tag::SPECIAL | special_tag::FALSE, 0x00];
+    pub const NULL: [u8; 2] = [tag::SPECIAL | special_tag::NULL, 0x00];
+    pub const UNDEFINED: [u8; 2] = [tag::SPECIAL | special_tag::UNDEFINED, 0x00];
 }
 
 // API
@@ -119,7 +117,7 @@ impl RawValue {
         let root = &data[(data.len() - 2)..];
         let root: &RawValue = std::mem::transmute(root);
         if root.value_type() == ValueType::Pointer {
-            return root.as_value_ptr().deref_unchecked(false);
+            return ValuePointer::from_value(root).deref_unchecked(false);
         } else if data.len() == 2 {
             return root;
         }
@@ -226,7 +224,7 @@ impl RawValue {
         let root: &RawValue = unsafe { std::mem::transmute(root) };
 
         if root.value_type() == ValueType::Pointer {
-            return root.as_value_ptr().deref(false, data.as_ptr());
+            return ValuePointer::from_value(root).deref(false, data.as_ptr());
         } else if data.len() == 2 {
             return Some(root);
         }
@@ -244,7 +242,7 @@ impl RawValue {
                 RawArray::from_value(self).validate(data_start, data_end)
             }
             ValueType::Pointer => {
-                if let Some(target) = self.as_value_ptr().deref(wide, data_start) {
+                if let Some(target) = ValuePointer::from_value(self).deref(wide, data_start) {
                     target.validate::<false>(wide, data_start, self.bytes.as_ptr())
                 } else {
                     false
@@ -341,7 +339,7 @@ impl RawValue {
         let size = self.bytes[0] & 0x0F;
         if size == 0x0F {
             // varint
-            let (bytes_read, size) = self.get_varint();
+            let (bytes_read, size) = varint::read(&self.bytes);
             if bytes_read == 0 {
                 return &[];
             }
@@ -351,52 +349,6 @@ impl RawValue {
             let end = 1 + size as usize;
             &self.bytes[1..end]
         }
-    }
-
-    // Return (bytes_read, size)
-    fn get_varint(&self) -> (usize, u64) {
-        if self.bytes.len() < 2 {
-            return (0, 0);
-        }
-
-        if self.bytes.len() == 2 {
-            return (1, self.bytes[1] as u64);
-        }
-
-        let mut shift = 0;
-        let mut res = 0_u64;
-
-        let end: usize = self.bytes.len().min(VARINT_MAX_LEN + 1);
-
-        for (i, byte) in self.bytes[1..end].iter().enumerate() {
-            if *byte >= 0x80 {
-                res |= ((*byte & 0x7F) as u64) << shift;
-                shift += 7;
-            } else {
-                res |= (*byte as u64) << shift;
-                // Make sure the varint is below the max length
-                if i == VARINT_MAX_LEN && *byte > 1 {
-                    return (0, 0);
-                }
-                return (i + 1, res);
-            }
-        }
-
-        (0, 0)
-    }
-}
-
-// Conversion to internal types
-// These types have the same memory layout as RawValue, so transmute is safe
-impl RawValue {
-    #[inline(always)]
-    pub(super) fn as_value_ptr(&self) -> &ValuePointer {
-        unsafe { std::mem::transmute(self) }
-    }
-
-    #[inline(always)]
-    pub(super) fn as_array(&self) -> &RawArray {
-        unsafe { std::mem::transmute(self) }
     }
 }
 

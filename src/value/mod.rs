@@ -2,7 +2,7 @@ pub use array::Array;
 pub use dict::Dict;
 use std::fmt::{Display, Formatter};
 
-use crate::raw::{RawValue, ValueType, self};
+use crate::raw::{value::RawValue, value::ValueType};
 
 mod array;
 mod dict;

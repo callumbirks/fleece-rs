@@ -1,4 +1,7 @@
-use super::{RawValue, ValueType};
+use super::{
+    pointer::ValuePointer,
+    value::{RawValue, ValueType},
+};
 
 #[repr(transparent)]
 pub(crate) struct RawArray {
@@ -21,7 +24,7 @@ impl RawArray {
 
         let target = unsafe { self.value.offset_unchecked(2 + offset as isize, width) };
         Some(if target.value_type() == ValueType::Pointer {
-            unsafe { target.as_value_ptr().deref_unchecked(self.is_wide()) }
+            unsafe { ValuePointer::from_value(target).deref_unchecked(self.is_wide()) }
         } else {
             target
         })
@@ -120,7 +123,7 @@ impl<'a> Iterator for RawArrayIter<'a> {
         }
 
         let val = if self.current.value_type() == ValueType::Pointer {
-            unsafe { self.current.as_value_ptr().deref_unchecked(self.width == 4) }
+            unsafe { ValuePointer::from_value(self.current).deref_unchecked(self.width == 4) }
         } else {
             self.current
         };
