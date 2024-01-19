@@ -8,7 +8,7 @@ fn decode_person() {
     let person = Value::from_bytes(PERSON_ENCODED);
     assert!(person.is_some());
     let person = person.unwrap();
-    println!("{}", person);
+    println!("{person}");
     assert!(matches!(person, Value::Dict { .. }));
     let Value::Dict(person_dict) = person else {
         unreachable!()

@@ -1,3 +1,5 @@
+#![allow(clippy::transmute_ptr_to_ptr)]
+
 use super::{array::RawArray, pointer::ValuePointer, varint};
 use std::fmt::{Display, Formatter};
 
@@ -45,12 +47,10 @@ pub mod special_tag {
 }
 
 impl ValueType {
-    #[inline(always)]
     pub fn from_byte(byte: u8) -> Self {
         match byte & 0xF0 {
             // Some types have extra info in the lower 4 bits
             tag::SPECIAL => match byte & 0x0F {
-                special_tag::NULL => ValueType::Null,
                 special_tag::UNDEFINED => ValueType::Undefined,
                 special_tag::FALSE => ValueType::False,
                 special_tag::TRUE => ValueType::True,
@@ -81,7 +81,7 @@ impl ValueType {
 }
 
 pub mod constants {
-    use super::*;
+    use super::{special_tag, tag};
 
     pub const TRUE: [u8; 2] = [tag::SPECIAL | special_tag::TRUE, 0x00];
     pub const FALSE: [u8; 2] = [tag::SPECIAL | special_tag::FALSE, 0x00];
@@ -125,6 +125,7 @@ impl RawValue {
     }
 
     // Will cause a panic if bytes is empty
+    #[allow(clippy::inline_always)]
     #[inline(always)]
     pub fn value_type(&self) -> ValueType {
         ValueType::from_byte(self.bytes[0])
@@ -135,10 +136,10 @@ impl RawValue {}
 
 // Into Conversions
 impl RawValue {
+    // False is false, Numbers not equal to 0 are false, everything else is true
     pub fn to_bool(&self) -> bool {
         match self.value_type() {
             ValueType::False => false,
-            ValueType::True => true,
             ValueType::Short | ValueType::Int | ValueType::Float | ValueType::Double => {
                 self.to_int() != 0
             }
@@ -146,17 +147,21 @@ impl RawValue {
         }
     }
 
+    #[allow(clippy::match_same_arms)]
+    #[allow(clippy::cast_possible_wrap)]
+    #[allow(clippy::cast_possible_truncation)]
     pub fn to_int(&self) -> i64 {
         match self.value_type() {
             ValueType::True => 1,
             ValueType::False => 0,
-            ValueType::UnsignedShort => self.get_short() as i64,
+            ValueType::UnsignedShort => i64::from(self.get_short()),
             ValueType::Short => {
                 let i: u16 = self.get_short();
                 if i & 0x0800 != 0 {
-                    (i as i16 | 0xF000_u16 as i16) as i64
+                    // Sign extend
+                    i64::from((i | 0xF000) as i16)
                 } else {
-                    i as i64
+                    i64::from(i)
                 }
             }
             ValueType::Int | ValueType::UnsignedInt => {
@@ -170,16 +175,18 @@ impl RawValue {
         }
     }
 
+    #[allow(clippy::cast_sign_loss)]
     pub fn to_unsigned_int(&self) -> u64 {
         self.to_int() as u64
     }
 
+    #[allow(clippy::cast_precision_loss)]
     pub fn to_double(&self) -> f64 {
         match self.value_type() {
             ValueType::Float => {
                 let mut buf = [0u8; 4];
                 buf.copy_from_slice(&self.bytes[2..6]);
-                f32::from_le_bytes(buf) as f64
+                f64::from(f32::from_le_bytes(buf))
             }
             ValueType::Double => {
                 let mut buf = [0u8; 8];
@@ -190,6 +197,7 @@ impl RawValue {
         }
     }
 
+    #[allow(clippy::cast_possible_truncation)]
     pub fn to_float(&self) -> f32 {
         self.to_double() as f32
     }
@@ -213,6 +221,7 @@ impl RawValue {
 impl RawValue {
     /// Finds the root Fleece value in the data. Performs basic validation that the data is
     /// correctly sized. To ensure the validity of the Fleece data, one should also call `RawValue::validate()`
+    #[allow(clippy::inline_always)]
     #[inline(always)]
     fn find_root(data: &[u8]) -> Option<&Self> {
         // Data must be at least 2 bytes, and evenly sized
@@ -260,6 +269,7 @@ impl RawValue {
 
     // The number of bytes required to hold this value
     // For Dict and Array, this does not include the size of inline values, only the header
+    #[allow(clippy::match_same_arms)]
     pub fn required_size(&self) -> usize {
         match self.value_type() {
             ValueType::Null
@@ -286,7 +296,7 @@ impl RawValue {
         }
     }
 
-    /// Converts a pointer to a RawValue reference, and validates its size
+    /// Converts a pointer to a `RawValue` reference, and validates its size
     pub(super) fn from_raw<'a>(ptr: *const u8, available_size: usize) -> Option<&'a RawValue> {
         let target: &RawValue = unsafe {
             let slice = std::slice::from_raw_parts(ptr, available_size);
@@ -303,9 +313,10 @@ impl RawValue {
         Some(target)
     }
 
-    /// Converts a pointer to a RawValue reference.
+    /// Converts a pointer to a `RawValue` reference.
     /// # Safety
-    /// The caller should ensure the target is a valid RawValue.
+    /// The caller should ensure the target is a valid `RawValue`.
+    #[allow(clippy::inline_always)]
     #[inline(always)]
     pub(super) unsafe fn from_raw_unchecked<'a>(
         ptr: *const u8,
@@ -316,6 +327,7 @@ impl RawValue {
     }
 
     /// A convenience for offset then `from_raw_unchecked`
+    #[allow(clippy::inline_always)]
     #[inline(always)]
     pub(super) unsafe fn offset_unchecked(&self, count: isize, width: u8) -> &RawValue {
         let target_ptr = unsafe { self.bytes.as_ptr().offset(count) };
@@ -325,6 +337,7 @@ impl RawValue {
 
 // Underlying data getters
 impl RawValue {
+    #[allow(clippy::inline_always)]
     #[inline(always)]
     fn get_short(&self) -> u16 {
         let mut buf = [0u8; 2];
@@ -343,6 +356,7 @@ impl RawValue {
             if bytes_read == 0 {
                 return &[];
             }
+            #[allow(clippy::cast_possible_truncation)]
             let end = 1 + bytes_read + size as usize;
             &self.bytes[1 + bytes_read..end]
         } else {

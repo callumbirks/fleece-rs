@@ -9,7 +9,11 @@ pub(crate) struct RawArray {
 }
 
 impl RawArray {
+    #[allow(clippy::inline_always)]
+    #[allow(clippy::transmute_ptr_to_ptr)]
     #[inline(always)]
+    // As this struct is repr(transparent), it has the same memory layout as its only field, a RawValue.
+    // So the transmute is safe.
     pub fn from_value(value: &RawValue) -> &Self {
         unsafe { std::mem::transmute(value) }
     }

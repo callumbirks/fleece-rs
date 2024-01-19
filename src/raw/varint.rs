@@ -5,7 +5,7 @@ pub fn read(data: &[u8]) -> (usize, u64) {
         return (0, 0);
     }
     if data.len() == 2 {
-        return (1, data[1] as u64);
+        return (1, u64::from(data[1]));
     }
 
     let mut shift = 0;
@@ -13,10 +13,10 @@ pub fn read(data: &[u8]) -> (usize, u64) {
     let end: usize = data.len().min(MAX_LEN + 1);
     for (i, byte) in data[1..end].iter().enumerate() {
         if *byte >= 0x80 {
-            res |= ((*byte & 0x7F) as u64) << shift;
+            res |= u64::from(*byte & 0x7F) << shift;
             shift += 7;
         } else {
-            res |= (*byte as u64) << shift;
+            res |= u64::from(*byte) << shift;
             // Make sure the varint is below the max length
             if i == MAX_LEN && *byte > 1 {
                 return (0, 0);
@@ -27,6 +27,7 @@ pub fn read(data: &[u8]) -> (usize, u64) {
     (0, 0)
 }
 
+#[allow(clippy::cast_possible_truncation)]
 pub fn write(out: &mut [u8], value: u64) -> usize {
     let mut value = value;
     let mut bytes_written: usize = 0;

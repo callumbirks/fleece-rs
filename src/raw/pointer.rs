@@ -7,6 +7,8 @@ pub(super) struct ValuePointer {
 }
 
 impl ValuePointer {
+    #[allow(clippy::inline_always)]
+    #[allow(clippy::transmute_ptr_to_ptr)]
     #[inline(always)]
     pub fn from_value(value: &RawValue) -> &Self {
         unsafe { std::mem::transmute(value) }
@@ -32,7 +34,8 @@ impl ValuePointer {
             return None;
         }
 
-        // First get the pointer given by offset, so we can validate before dereferencing
+        // First get the pointer given by offset, so we can validate before de-referencing
+        #[allow(clippy::cast_possible_wrap)]
         let target_ptr = unsafe { self.offset(-(offset as isize)) };
 
         // Is this pointer external to the source data?
@@ -48,9 +51,8 @@ impl ValuePointer {
 
         if target.value_type() == ValueType::Pointer {
             return ValuePointer::from_value(target).deref(true, data_start);
-        } else {
-            Some(target)
         }
+        Some(target)
     }
 
     // This should only be called when the data has already been validated
@@ -62,28 +64,30 @@ impl ValuePointer {
         };
         debug_assert_ne!(offset, 0);
 
+        #[allow(clippy::cast_possible_wrap)]
         let target_ptr = self.offset(-(offset as isize));
 
         let target = RawValue::from_raw_unchecked(target_ptr, offset);
 
         if target.value_type() == ValueType::Pointer {
             return ValuePointer::from_value(target).deref_unchecked(true);
-        } else {
-            target
         }
+        target
     }
 
+    #[allow(clippy::inline_always)]
     #[inline(always)]
     unsafe fn offset(&self, offset: isize) -> *const u8 {
         self.value.bytes.as_ptr().offset(offset)
     }
 
+    #[allow(clippy::inline_always)]
     #[inline(always)]
     unsafe fn get_offset<const WIDE: bool>(&self) -> usize {
         if WIDE {
             let mut buf = [0u8; 4];
             buf.copy_from_slice(&self.value.bytes[0..4]);
-            ((u32::from_be_bytes(buf) & !0xC0000000) << 1) as usize
+            ((u32::from_be_bytes(buf) & !0xC000_0000) << 1) as usize
         } else {
             let mut buf = [0u8; 2];
             buf.copy_from_slice(&self.value.bytes[0..2]);
