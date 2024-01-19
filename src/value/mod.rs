@@ -22,11 +22,18 @@ pub enum Value<'a> {
 }
 
 impl<'a> Value<'a> {
+    /// Parse the given data as Fleece data. Returns `None` if the data is not valid Fleece data.
+    #[must_use]
     pub fn from_bytes(data: &'a [u8]) -> Option<Value<'a>> {
         let raw_value = RawValue::from_bytes(data)?;
         Value::from_raw(raw_value)
     }
 
+    /// Parse the given data as Fleece data, but with no validation. Much faster than `from_bytes`, but
+    /// may cause panics if the data is not valid Fleece data.
+    /// # Safety
+    /// This should only be used if you are sure that the given data is valid Fleece data.
+    #[must_use]
     pub unsafe fn from_bytes_unchecked(data: &'a [u8]) -> Option<Value<'a>> {
         let raw_value = RawValue::from_bytes_unchecked(data);
         Value::from_raw(raw_value)
@@ -48,7 +55,7 @@ impl<'a> Value<'a> {
             ValueType::Data => Some(Value::Data(raw_value.to_data())),
             ValueType::Dict => Some(Value::Dict(Dict::new(raw_value))),
             ValueType::Array => Some(Value::Array(Array::new(raw_value))),
-            // RawValue should never be pointer, as pointers are always dereferenced in from_data
+            // RawValue should never be pointer, as pointers are always de-referenced in `RawValue::from_bytes`
             ValueType::Pointer => None,
         }
     }
@@ -59,24 +66,24 @@ impl Display for Value<'_> {
         match self {
             Value::Null => write!(f, "null"),
             Value::Undefined => write!(f, "undefined"),
-            Value::Bool(b) => write!(f, "{}", b),
-            Value::Unsigned(u) => write!(f, "{}", u),
-            Value::Int(i) => write!(f, "{}", i),
-            Value::Float(flt) => write!(f, "{}", flt),
-            Value::Double(dbl) => write!(f, "{}", dbl),
-            Value::String(s) => write!(f, "{}", s),
-            Value::Data(d) => write!(f, "{:?}", d),
+            Value::Bool(b) => write!(f, "{b}"),
+            Value::Unsigned(u) => write!(f, "{u}"),
+            Value::Int(i) => write!(f, "{i}"),
+            Value::Float(flt) => write!(f, "{flt}"),
+            Value::Double(dbl) => write!(f, "{dbl}"),
+            Value::String(s) => write!(f, "{s}"),
+            Value::Data(d) => write!(f, "{d:?}"),
             Value::Array(arr) => {
                 write!(f, "Array[")?;
-                for val in arr.into_iter() {
-                    write!(f, "{}, ", val)?;
+                for val in arr {
+                    write!(f, "{val}, ")?;
                 }
                 write!(f, "]")
             }
             Value::Dict(dict) => {
                 writeln!(f, "Dict[")?;
-                for (key, val) in dict.into_iter() {
-                    writeln!(f, "{} : {},", key, val)?;
+                for (key, val) in dict {
+                    writeln!(f, "{key} : {val},")?;
                 }
                 writeln!(f, "]")
             }

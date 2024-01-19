@@ -8,7 +8,7 @@ const PEOPLE_ENCODED: &[u8] = include_bytes!("../1000people.fleece");
 fn decode_people(c: &mut Criterion) {
     c.bench_function("fleece_decode", |b| {
         b.iter(|| {
-            Value::from_bytes(black_box(PEOPLE_ENCODED));
+            let _ = Value::from_bytes(black_box(PEOPLE_ENCODED));
         })
     });
 }
@@ -16,7 +16,7 @@ fn decode_people(c: &mut Criterion) {
 fn decode_people_unchecked(c: &mut Criterion) {
     c.bench_function("fleece_decode_unchecked", |b| {
         b.iter(|| {
-            unsafe { Value::from_bytes_unchecked(black_box(PEOPLE_ENCODED)) };
+            let _ = unsafe { Value::from_bytes_unchecked(black_box(PEOPLE_ENCODED)) };
         })
     });
 }
