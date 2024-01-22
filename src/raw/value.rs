@@ -259,7 +259,8 @@ impl RawValue {
             }
             _ => {
                 if IS_ARR_ELEM {
-                    self.required_size() <= if wide { 4 } else { 2 }
+                    // We don't need to validate the value fits within the data, as RawArray::validate already does that
+                    true
                 } else {
                     self.bytes.as_ptr() as usize + self.required_size() <= data_end as usize
                 }

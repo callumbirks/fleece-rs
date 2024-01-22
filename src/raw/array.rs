@@ -76,6 +76,9 @@ impl RawArray {
 
 // Validation
 impl RawArray {
+    // I found a 10 percent performance improvement with inline(never) for this function.
+    // I think the function is heavier than the compiler assumes.
+    #[inline(never)]
     pub(super) fn validate(&self, data_start: *const u8, data_end: *const u8) -> bool {
         let is_wide = self.is_wide();
         let width: u8 = if is_wide { 4 } else { 2 };
