@@ -26,6 +26,7 @@ impl RawArray {
             return None;
         }
 
+        #[allow(clippy::cast_possible_wrap)]
         let target = unsafe { self.value.offset_unchecked(2 + offset as isize, width) };
         Some(if target.value_type() == ValueType::Pointer {
             unsafe { ValuePointer::from_value(target).deref_unchecked(self.is_wide()) }
@@ -86,8 +87,8 @@ impl RawArray {
         }
 
         let mut current = first;
-        let mut elem_count = elem_count;
-        while elem_count > 0 {
+
+        for _ in 0..elem_count {
             let next = unsafe { current.add(width as usize) };
             if let Some(current_value) = RawValue::from_raw(current, width as usize) {
                 if !current_value.validate::<true>(is_wide, data_start, next) {
@@ -98,8 +99,8 @@ impl RawArray {
             }
 
             current = next;
-            elem_count -= 1;
         }
+
         true
     }
 }
@@ -126,6 +127,8 @@ impl<'a> Iterator for RawArrayIter<'a> {
             return None;
         }
 
+        // `deref_unchecked` is safe here, as the data has already been validated in `RawArray::validate`, and
+        // we do bounds checking above.
         let val = if self.current.value_type() == ValueType::Pointer {
             unsafe { ValuePointer::from_value(self.current).deref_unchecked(self.width == 4) }
         } else {
