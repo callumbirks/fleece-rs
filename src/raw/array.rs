@@ -76,24 +76,24 @@ impl RawArray {
 
 // Validation
 impl RawArray {
-    // I found a 10 percent performance improvement with inline(never) for this function.
+    // I found a 10 percent performance improvement on decode bench with inline(never) for this function.
     // I think the function is heavier than the compiler assumes.
     #[inline(never)]
     pub(super) fn validate(&self, data_start: *const u8, data_end: *const u8) -> bool {
         let is_wide = self.is_wide();
-        let width: u8 = if is_wide { 4 } else { 2 };
+        let width: usize = if is_wide { 4 } else { 2 };
         let elem_count = self.elem_count();
 
         let first = unsafe { self.value.bytes.as_ptr().add(2) };
-        if (first as usize) + (elem_count * width as usize) > (data_end as usize) {
+        if (first as usize) + (elem_count * width) > (data_end as usize) {
             return false;
         }
 
         let mut current = first;
 
         for _ in 0..elem_count {
-            let next = unsafe { current.add(width as usize) };
-            if let Some(current_value) = RawValue::from_raw(current, width as usize) {
+            let next = unsafe { current.add(width) };
+            if let Some(current_value) = RawValue::from_raw(current, width) {
                 if !current_value.validate::<true>(is_wide, data_start, next) {
                     return false;
                 }

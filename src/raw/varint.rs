@@ -1,4 +1,4 @@
-const MAX_LEN: usize = 10;
+pub const MAX_LEN: usize = 10;
 
 pub fn read(data: &[u8]) -> (usize, u64) {
     if data.len() < 2 {

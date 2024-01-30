@@ -27,3 +27,8 @@ fn decode_person() {
         panic!("Expected age value to be an int");
     }
 }
+
+#[test]
+fn encode_person() {
+
+}
