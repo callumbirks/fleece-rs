@@ -1,3 +1,6 @@
+#![warn(clippy::pedantic)]
+#![allow(clippy::module_name_repetitions)]
+
 mod raw;
 mod value;
 mod encoder;
@@ -11,3 +14,4 @@ pub use value::Value;
 
 #[cfg(test)]
 mod tests;
+mod sharedkeys;

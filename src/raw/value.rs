@@ -39,6 +39,7 @@ pub mod tag {
     pub const DATA: u8 = 0x50;
     pub const ARRAY: u8 = 0x60;
     pub const DICT: u8 = 0x70;
+    // Pointers are 0x80 to 0xF0
     pub const POINTER: u8 = 0x80;
 }
 
@@ -114,7 +115,7 @@ impl RawValue {
 
     /// Like `from_bytes`, but doesn't do any validation, so it should only be used on trusted data.
     /// If you call this on invalid Fleece data, it will probably panic.
-    /// The performance uplift of this function is several thousand times.
+    /// The performance uplift of this function is great, but must be used carefully.
     pub unsafe fn from_bytes_unchecked(data: &[u8]) -> &Self {
         // Root is 2 bytes at the end of the data
         let root = &data[(data.len() - 2)..];
