@@ -32,7 +32,7 @@ impl Encoder {
     /// Write an encodable type to the encoder. The parameter may be any borrowed form of an encodable type.
     pub fn write<R, T>(&mut self, value: &R) -> Option<()>
     where
-        R: Borrow<T>,
+        R: Borrow<T> + ?Sized,
         T: Encodable + ?Sized,
     {
         value.borrow().write_fleece_to(&mut self.bytes)
