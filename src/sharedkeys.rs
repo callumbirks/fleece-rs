@@ -13,8 +13,9 @@ pub struct SharedKeys {
 }
 
 impl SharedKeys {
+    // 2048 means the max int will be 2047, which fits in a Fleece Short (12 bits).
     const MAX_KEYS: u16 = 2048;
-    const KEY_LENGTH: u16 = 16;
+    const MAX_KEY_LENGTH: u16 = 16;
 
     pub fn new() -> Self {
         Self {
@@ -90,7 +91,7 @@ impl SharedKeys {
     fn can_add(&self, key: &str) -> bool {
         let _read_guard = self.lock.read().unwrap();
         self.len < SharedKeys::MAX_KEYS
-            && key.len() <= SharedKeys::KEY_LENGTH as usize
+            && key.len() <= SharedKeys::MAX_KEY_LENGTH as usize
             && SharedKeys::can_encode(key)
     }
 

@@ -2,6 +2,7 @@
 
 use super::{array::RawArray, pointer::ValuePointer, varint};
 use std::fmt::{Display, Formatter};
+use std::io::Write;
 
 #[repr(transparent)]
 pub struct RawValue {
