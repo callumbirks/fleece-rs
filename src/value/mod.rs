@@ -50,7 +50,8 @@ impl<'a> Value<'a> {
             }
             ValueType::Short | ValueType::Int => Some(Value::Int(raw_value.to_int())),
             ValueType::Float => Some(Value::Float(raw_value.to_float())),
-            ValueType::Double => Some(Value::Double(raw_value.to_double())),
+            ValueType::Double32 => Some(Value::Double(raw_value.to_double())),
+            ValueType::Double64 => Some(Value::Double(raw_value.to_double())),
             ValueType::String => Some(Value::String(raw_value.to_str())),
             ValueType::Data => Some(Value::Data(raw_value.to_data())),
             ValueType::Dict => Some(Value::Dict(Dict::new(raw_value))),

@@ -19,7 +19,10 @@ pub enum ValueType {
     UnsignedShort,
     UnsignedInt,
     Float,
-    Double,
+    // Double32 is encoded as a 32-bit float, but should be decoded into a 64-bit float. This avoids precision loss in
+    // some cases. See https://github.com/couchbase/fleece/issues/206
+    Double32,
+    Double64,
     String,
     Data,
     Array,
@@ -65,10 +68,13 @@ impl ValueType {
                 0x00 => ValueType::Int,
                 _ => ValueType::UnsignedInt,
             },
-            // For floats, the sign bit signifies the type is double
-            tag::FLOAT => match byte & 0x08 {
+            // For floats, the 5th bit signifies 32 / 64-bit (0 or 1). The 6th bit signifies if this should be decoded into a
+            // 32-bit or 64-bit value (0 or 1). This can avoid precision loss in some cases.
+            // See https://github.com/couchbase/fleece/issues/206
+            tag::FLOAT => match byte & 0x0C {
                 0x00 => ValueType::Float,
-                _ => ValueType::Double,
+                0x04 => ValueType::Double32,
+                _ => ValueType::Double64,
             },
             tag::STRING => ValueType::String,
             tag::DATA => ValueType::Data,
@@ -140,7 +146,7 @@ impl RawValue {
     pub fn to_bool(&self) -> bool {
         match self.value_type() {
             ValueType::False => false,
-            ValueType::Short | ValueType::Int | ValueType::Float | ValueType::Double => {
+            ValueType::Short | ValueType::Int | ValueType::Float | ValueType::Double32 | ValueType::Double64 => {
                 self.to_int() != 0
             }
             _ => true,
@@ -170,7 +176,7 @@ impl RawValue {
                 buf.copy_from_slice(&self.bytes[1..count]);
                 i64::from_le_bytes(buf)
             }
-            ValueType::Float | ValueType::Double => self.to_double() as i64,
+            ValueType::Float | ValueType::Double32 | ValueType::Double64 => self.to_double() as i64,
             _ => 0,
         }
     }
@@ -183,12 +189,12 @@ impl RawValue {
     #[allow(clippy::cast_precision_loss)]
     pub fn to_double(&self) -> f64 {
         match self.value_type() {
-            ValueType::Float => {
+            ValueType::Float | ValueType::Double32 => {
                 let mut buf = [0u8; 4];
                 buf.copy_from_slice(&self.bytes[2..6]);
                 f64::from(f32::from_le_bytes(buf))
             }
-            ValueType::Double => {
+            ValueType::Double64 => {
                 let mut buf = [0u8; 8];
                 buf.copy_from_slice(&self.bytes[2..10]);
                 f64::from_le_bytes(buf)
@@ -280,8 +286,8 @@ impl RawValue {
             | ValueType::UnsignedShort
             | ValueType::Short => 2,
             ValueType::UnsignedInt | ValueType::Int => 2 + (self.bytes[0] & 0x07) as usize,
-            ValueType::Float => 6,
-            ValueType::Double => 10,
+            ValueType::Float | ValueType::Double32 => 6,
+            ValueType::Double64 => 10,
             ValueType::String | ValueType::Data => {
                 let data = self.get_data();
                 if let Some(last) = data.last() {
@@ -357,7 +363,6 @@ impl RawValue {
             if bytes_read == 0 {
                 return &[];
             }
-            #[allow(clippy::cast_possible_truncation)]
             let end = 1 + bytes_read + size as usize;
             &self.bytes[1 + bytes_read..end]
         } else {
@@ -386,7 +391,7 @@ impl Display for RawValue {
             ValueType::True => write!(f, "True"),
             ValueType::UnsignedShort | ValueType::UnsignedInt => self.to_unsigned_int().fmt(f),
             ValueType::Short | ValueType::Int => self.to_int().fmt(f),
-            ValueType::Float | ValueType::Double => self.to_float().fmt(f),
+            ValueType::Float | ValueType::Double32 | ValueType::Double64 => self.to_float().fmt(f),
             ValueType::String => self.to_str().fmt(f),
             ValueType::Data => write!(f, "Data"),
             ValueType::Array => write!(f, "Array"),
