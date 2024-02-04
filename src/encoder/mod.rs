@@ -3,6 +3,7 @@ use std::borrow::Borrow;
 use std::cell::RefCell;
 use std::io::Write;
 use std::rc::Rc;
+use crate::encoder::value_stack::{Collection, CollectionStack, Dict};
 
 mod encodable;
 mod value_stack;
@@ -21,21 +22,19 @@ enum LastAdded {
     Value,
 }
 
-pub struct Encoder {
+pub struct Encoder<'a> {
     out: Vec<u8>,
     shared_keys: Option<Rc<RefCell<SharedKeys>>>,
-    // value_stack: [sized::NarrowValue],
-    // array_stack: ArrayStack,
-    value_stack: value_stack::ValueStack,
+    collection_stack: CollectionStack<'a>,
     last_added: LastAdded,
 }
 
-impl Encoder {
+impl<'a> Encoder<'a> {
     pub fn new() -> Self {
         Self {
             out: Vec::new(),
             shared_keys: None,
-            value_stack: value_stack::ValueStack::new(),
+            collection_stack: CollectionStack::new(),
             last_added: LastAdded::Value,
         }
     }
@@ -44,7 +43,7 @@ impl Encoder {
         Self {
             out: Vec::new(),
             shared_keys: Some(shared_keys),
-            value_stack: value_stack::ValueStack::new(),
+            collection_stack: CollectionStack::new(),
             last_added: LastAdded::Value,
         }
     }

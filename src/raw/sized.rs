@@ -1,8 +1,26 @@
+use crate::encoder::Encodable;
 use crate::raw::value::{RawValue, ValueType};
+use std::io::Write;
 
 pub enum SizedValue {
     Narrow(NarrowValue),
     Wide(WideValue),
+}
+
+impl Encodable for SizedValue {
+    fn write_fleece_to<W: Write>(&self, writer: &mut W) -> Option<()> {
+        match self {
+            SizedValue::Narrow(narrow) => writer.write_all(&narrow.bytes).ok(),
+            SizedValue::Wide(wide) => writer.write_all(&wide.bytes).ok(),
+        }
+    }
+
+    fn fleece_size(&self) -> usize {
+        match self {
+            SizedValue::Narrow(_) => 2,
+            SizedValue::Wide(_) => 4,
+        }
+    }
 }
 
 pub struct NarrowValue {
@@ -25,7 +43,11 @@ impl NarrowValue {
     }
 
     pub fn as_value(&self) -> &RawValue {
-        unsafe { std::mem::transmute(&self.bytes[..]) }
+        unsafe { std::mem::transmute(&self.bytes as &[u8]) }
+    }
+
+    pub fn as_bytes(&self) -> &[u8; 2] {
+        &self.bytes
     }
 
     pub fn widen(self) -> WideValue {
@@ -47,6 +69,10 @@ impl WideValue {
     }
 
     pub fn as_value(&self) -> &RawValue {
-        unsafe { std::mem::transmute(&self.bytes[..]) }
+        unsafe { std::mem::transmute(&self.bytes as &[u8]) }
+    }
+
+    pub fn as_bytes(&self) -> &[u8; 4] {
+        &self.bytes
     }
 }
