@@ -16,11 +16,11 @@ pub enum ValueType {
     True,
     Short,
     Int,
-    UnsignedShort,
     UnsignedInt,
     Float,
     // Double32 is encoded as a 32-bit float, but should be decoded into a 64-bit float. This avoids precision loss in
-    // some cases. See https://github.com/couchbase/fleece/issues/206
+    // cases where the Encoder encodes a 64-bit float as a 32-bit float because the float is representable in 32 bits.
+    // See https://github.com/couchbase/fleece/issues/206
     Double32,
     Double64,
     String,
@@ -59,11 +59,8 @@ impl ValueType {
                 special_tag::TRUE => ValueType::True,
                 _ => ValueType::Null,
             },
-            // 0x08 is the sign bit
-            tag::SHORT => match byte & 0x08 {
-                0x00 => ValueType::Short,
-                _ => ValueType::UnsignedShort,
-            },
+            tag::SHORT => ValueType::Short,
+            // 0x08 bit set means int is unsigned.
             tag::INT => match byte & 0x08 {
                 0x00 => ValueType::Int,
                 _ => ValueType::UnsignedInt,
@@ -154,22 +151,34 @@ impl RawValue {
     }
 
     #[allow(clippy::match_same_arms)]
+    #[allow(clippy::cast_possible_truncation)]
+    pub fn to_short(&self) -> i16 {
+        match self.value_type() {
+            ValueType::True => 1,
+            ValueType::False => 0,
+            // Short is always negative, so sign extend it.
+            ValueType::Short => {
+                let i = self.get_short();
+                if i & 0x08 != 0 {
+                    (i | 0xF000) as i16
+                } else {
+                    i as i16
+                }
+            },
+            ValueType::Int | ValueType::UnsignedInt => self.to_int() as i16,
+            ValueType::Float | ValueType::Double32 | ValueType::Double64 => self.to_double() as i16,
+            _ => 0,
+        }
+    }
+
+    #[allow(clippy::match_same_arms)]
     #[allow(clippy::cast_possible_wrap)]
     #[allow(clippy::cast_possible_truncation)]
     pub fn to_int(&self) -> i64 {
         match self.value_type() {
             ValueType::True => 1,
             ValueType::False => 0,
-            ValueType::UnsignedShort => i64::from(self.get_short()),
-            ValueType::Short => {
-                let i: u16 = self.get_short();
-                if i & 0x0800 != 0 {
-                    // Sign extend
-                    i64::from((i | 0xF000) as i16)
-                } else {
-                    i64::from(i)
-                }
-            }
+            ValueType::Short => i64::from(self.to_short()),
             ValueType::Int | ValueType::UnsignedInt => {
                 let count = (self.bytes[0] & 0x07) as usize + 1;
                 let mut buf = [0u8; 8];
@@ -283,7 +292,6 @@ impl RawValue {
             | ValueType::Undefined
             | ValueType::False
             | ValueType::True
-            | ValueType::UnsignedShort
             | ValueType::Short => 2,
             ValueType::UnsignedInt | ValueType::Int => 2 + (self.bytes[0] & 0x07) as usize,
             ValueType::Float | ValueType::Double32 => 6,
@@ -389,8 +397,9 @@ impl Display for RawValue {
             ValueType::Undefined => write!(f, "Undefined"),
             ValueType::False => write!(f, "False"),
             ValueType::True => write!(f, "True"),
-            ValueType::UnsignedShort | ValueType::UnsignedInt => self.to_unsigned_int().fmt(f),
-            ValueType::Short | ValueType::Int => self.to_int().fmt(f),
+            ValueType::Short => self.to_short().fmt(f),
+            ValueType::UnsignedInt => self.to_unsigned_int().fmt(f),
+            ValueType::Int => self.to_int().fmt(f),
             ValueType::Float | ValueType::Double32 | ValueType::Double64 => self.to_float().fmt(f),
             ValueType::String => self.to_str().fmt(f),
             ValueType::Data => write!(f, "Data"),
