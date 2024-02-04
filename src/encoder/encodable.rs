@@ -36,7 +36,7 @@ impl Encodable for i64 {
             8 - self.trailing_zeros() + 1
         } else {
             8 - self.trailing_ones() + 1
-        } as usize
+        } as usize;
     }
 }
 
@@ -204,7 +204,7 @@ impl Encodable for [u8] {
         match self.len() {
             0 | 1 => 2,
             2..=0x0E => 1 + self.len(),
-            _ => 1 + varint::size_required(self.len()) + self.len()
+            _ => 1 + varint::size_required(self.len()) + self.len(),
         }
     }
 }
@@ -233,7 +233,7 @@ where
     fn fleece_size(&self) -> usize {
         match self {
             Some(value) => value.fleece_size(),
-            None => 2
+            None => 2,
         }
     }
 }

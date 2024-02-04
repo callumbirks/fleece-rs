@@ -1,6 +1,6 @@
+mod encoder;
 mod raw;
 mod value;
-mod encoder;
 
 // Example of modules
 //#[cfg(feature = "datetime")]
@@ -9,6 +9,6 @@ mod encoder;
 
 pub use value::Value;
 
+mod sharedkeys;
 #[cfg(test)]
 mod tests;
-mod sharedkeys;

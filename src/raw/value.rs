@@ -145,9 +145,11 @@ impl RawValue {
     pub fn to_bool(&self) -> bool {
         match self.value_type() {
             ValueType::False => false,
-            ValueType::Short | ValueType::Int | ValueType::Float | ValueType::Double32 | ValueType::Double64 => {
-                self.to_int() != 0
-            }
+            ValueType::Short
+            | ValueType::Int
+            | ValueType::Float
+            | ValueType::Double32
+            | ValueType::Double64 => self.to_int() != 0,
             _ => true,
         }
     }
@@ -166,7 +168,7 @@ impl RawValue {
                 } else {
                     i as i16
                 }
-            },
+            }
             ValueType::Int | ValueType::UnsignedInt => self.to_int() as i16,
             ValueType::Float | ValueType::Double32 | ValueType::Double64 => self.to_double() as i16,
             _ => 0,

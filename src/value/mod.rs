@@ -46,9 +46,7 @@ impl<'a> Value<'a> {
             ValueType::Undefined => Some(Value::Undefined),
             ValueType::True => Some(Value::Bool(true)),
             ValueType::False => Some(Value::Bool(false)),
-            ValueType::UnsignedInt => {
-                Some(Value::Unsigned(raw_value.to_unsigned_int()))
-            }
+            ValueType::UnsignedInt => Some(Value::Unsigned(raw_value.to_unsigned_int())),
             ValueType::Short | ValueType::Int => Some(Value::Int(raw_value.to_int())),
             ValueType::Float => Some(Value::Float(raw_value.to_float())),
             ValueType::Double32 => Some(Value::Double(raw_value.to_double())),
@@ -62,11 +60,13 @@ impl<'a> Value<'a> {
         }
     }
 
-    #[must_use] pub fn is_null(&self) -> bool {
+    #[must_use]
+    pub fn is_null(&self) -> bool {
         matches!(self, Value::Null)
     }
 
-    #[must_use] pub fn is_undefined(&self) -> bool {
+    #[must_use]
+    pub fn is_undefined(&self) -> bool {
         matches!(self, Value::Undefined)
     }
 

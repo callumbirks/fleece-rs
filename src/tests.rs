@@ -29,6 +29,4 @@ fn decode_person() {
 }
 
 #[test]
-fn encode_person() {
-
-}
+fn encode_person() {}

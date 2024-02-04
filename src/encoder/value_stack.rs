@@ -1,8 +1,8 @@
-use std::collections::HashMap;
-use crate::raw::sized::{NarrowValue, SizedValue};
-use std::io::Write;
 use crate::encoder::Encodable;
+use crate::raw::sized::{NarrowValue, SizedValue};
 use crate::raw::value::tag;
+use std::collections::HashMap;
+use std::io::Write;
 
 pub struct CollectionStack<'a> {
     collections: Vec<Collection<'a>>,
@@ -41,7 +41,7 @@ impl<'a> Encodable for Collection<'a> {
     fn write_fleece_to<W: Write>(&self, writer: &mut W) -> Option<()> {
         match self {
             Collection::Array(arr) => arr.write_fleece_to(writer),
-            Collection::Dict(dict) => dict.write_fleece_to(writer)
+            Collection::Dict(dict) => dict.write_fleece_to(writer),
         }
     }
 

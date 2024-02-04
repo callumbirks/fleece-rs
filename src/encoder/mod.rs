@@ -1,9 +1,9 @@
+use crate::encoder::value_stack::{Collection, CollectionStack, Dict};
 use crate::sharedkeys::SharedKeys;
 use std::borrow::Borrow;
 use std::cell::RefCell;
 use std::io::Write;
 use std::rc::Rc;
-use crate::encoder::value_stack::{Collection, CollectionStack, Dict};
 
 mod encodable;
 mod value_stack;

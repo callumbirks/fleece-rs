@@ -1,8 +1,8 @@
+use crate::encoder::Encoder;
 use crate::Value;
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::RwLock;
-use crate::encoder::Encoder;
 
 pub struct SharedKeys {
     map: HashMap<Rc<str>, u16>,
