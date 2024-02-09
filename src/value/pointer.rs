@@ -46,7 +46,7 @@ impl Pointer {
             return None;
         }
 
-        let target = unsafe { Value::from_raw_unchecked(target_ptr, offset) };
+        let target = unsafe { Value::_from_raw_unchecked(target_ptr, offset) };
 
         if unlikely(target.value_type() == ValueType::Pointer) {
             return Pointer::from_value(target).deref(true, data_start);
@@ -64,7 +64,7 @@ impl Pointer {
         #[allow(clippy::cast_possible_wrap)]
         let target_ptr = self.offset(-(offset as isize));
 
-        let target = Value::from_raw_unchecked(target_ptr, offset);
+        let target = Value::_from_raw_unchecked(target_ptr, offset);
 
         if unlikely(target.value_type() == ValueType::Pointer) {
             return Pointer::from_value(target).deref_unchecked(true);

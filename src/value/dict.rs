@@ -86,10 +86,10 @@ impl Dict {
         None
     }
 
-    fn get_unchecked(&self, index: usize) -> Element {
+    unsafe fn get_unchecked(&self, index: usize) -> Element {
         let offset = 2 * index;
-        let key = unsafe { self.array.get_unchecked(offset) };
-        let val = unsafe { self.array.get_unchecked(offset + 1) };
+        let key = self.array.get_unchecked(offset);
+        let val = self.array.get_unchecked(offset + 1);
         Element { key, val }
     }
 

@@ -162,14 +162,14 @@ impl Encodable for f64 {
 
 fn write_fleece_constant<W: Write>(
     writer: &mut W,
-    constant: &[u8; 2],
+    constant: [u8; 2],
     is_wide: bool,
 ) -> Option<usize> {
     if is_wide {
-        writer.write_all(constant).ok()?;
+        writer.write_all(&constant).ok()?;
         Some(4)
     } else {
-        writer.write_all(constant).ok()?;
+        writer.write_all(&constant).ok()?;
         Some(2)
     }
 }
@@ -177,9 +177,9 @@ fn write_fleece_constant<W: Write>(
 impl Encodable for bool {
     fn write_fleece_to<W: Write>(&self, writer: &mut W, is_wide: bool) -> Option<usize> {
         if *self {
-            write_fleece_constant(writer, &value::constants::TRUE, is_wide)
+            write_fleece_constant(writer, value::constants::TRUE, is_wide)
         } else {
-            write_fleece_constant(writer, &value::constants::FALSE, is_wide)
+            write_fleece_constant(writer, value::constants::FALSE, is_wide)
         }
     }
 
@@ -198,7 +198,7 @@ impl Encodable for bool {
 
 impl Encodable for NullValue {
     fn write_fleece_to<W: Write>(&self, writer: &mut W, is_wide: bool) -> Option<usize> {
-        write_fleece_constant(writer, &value::constants::NULL, is_wide)
+        write_fleece_constant(writer, value::constants::NULL, is_wide)
     }
 
     fn fleece_size(&self) -> usize {
@@ -212,7 +212,7 @@ impl Encodable for NullValue {
 
 impl Encodable for UndefinedValue {
     fn write_fleece_to<W: Write>(&self, writer: &mut W, is_wide: bool) -> Option<usize> {
-        write_fleece_constant(writer, &value::constants::UNDEFINED, is_wide)
+        write_fleece_constant(writer, value::constants::UNDEFINED, is_wide)
     }
 
     fn fleece_size(&self) -> usize {

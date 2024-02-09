@@ -25,11 +25,7 @@ pub trait Encodable {
     fn to_value(&self) -> Option<SizedValue>;
 }
 
-enum LastAdded {
-    Key,
-    Value,
-}
-
+#[derive(Default)]
 pub struct Encoder<W: Write> {
     out: W,
     shared_keys: Option<SharedKeys>,
@@ -37,18 +33,14 @@ pub struct Encoder<W: Write> {
     len: usize,
 }
 
-impl<'a> Encoder<Vec<u8>> {
+impl Encoder<Vec<u8>> {
+    #[must_use]
     pub fn new() -> Encoder<Vec<u8>> {
-        Self {
-            out: Vec::new(),
-            shared_keys: None,
-            collection_stack: CollectionStack::new(),
-            len: 0,
-        }
+        Self::default()
     }
 }
 
-impl<'a, W: Write> Encoder<W> {
+impl<W: Write> Encoder<W> {
     pub fn new_to_writer(out: W) -> Self {
         Self {
             out,
@@ -115,8 +107,9 @@ impl<'a, W: Write> Encoder<W> {
         let Collection::Array(mut array) = self.collection_stack.pop()? else {
             return None;
         };
-        let is_wide = self._array_should_be_wide(&array);
+        let is_wide = Encoder::<W>::_array_should_be_wide(&array);
         self._fix_array_pointers(&mut array, is_wide);
+        #[allow(clippy::cast_possible_truncation)]
         let array_value = SizedValue::from_narrow([tag::ARRAY, array.values.len() as u8]);
         self._write(&array_value, is_wide);
 
@@ -148,11 +141,12 @@ impl<'a, W: Write> Encoder<W> {
 
         let offset_from_start = self.len;
 
-        let is_wide = self._dict_should_be_wide(&dict);
+        let is_wide = Encoder::<W>::_dict_should_be_wide(&dict);
 
         self._fix_dict_pointers(&mut dict, is_wide);
 
         let byte0 = if is_wide { tag::DICT | 0x08 } else { tag::DICT };
+        #[allow(clippy::cast_possible_truncation)]
         let dict_value = SizedValue::from_narrow([byte0, dict.values.len() as u8]);
         self._write(&dict_value, is_wide);
 
@@ -162,6 +156,7 @@ impl<'a, W: Write> Encoder<W> {
             self._write(v, is_wide);
         }
 
+        #[allow(clippy::cast_possible_truncation)]
         self._finished_collection(offset_from_start as u32);
 
         Some(())
@@ -191,6 +186,7 @@ impl<W: Write> Encoder<W> {
     /// Write a value to the output buffer and return the offset at which it was written.
     /// The offset can be used to create a pointer to the value.
     fn _write<T: Encodable + ?Sized>(&mut self, value: &T, is_wide: bool) -> Option<u32> {
+        #[allow(clippy::cast_possible_truncation)]
         let offset = self.len as u32;
         self.len += value.write_fleece_to(&mut self.out, is_wide)?;
         // Pad to even
@@ -211,7 +207,6 @@ impl<W: Write> Encoder<W> {
                 Some(())
             }
             Collection::Dict(dict) => dict.push_value(value),
-            _ => None,
         }
     }
 
@@ -221,11 +216,12 @@ impl<W: Write> Encoder<W> {
         }
     }
 
+    #[allow(clippy::cast_possible_truncation)]
     fn _actual_pointer_offset(&self, offset_from_start: u32) -> u32 {
         self.len as u32 - offset_from_start
     }
 
-    fn _array_should_be_wide(&self, array: &value_stack::Array) -> bool {
+    fn _array_should_be_wide(array: &value_stack::Array) -> bool {
         for v in &array.values {
             if v.is_wide() {
                 return true;
@@ -235,7 +231,7 @@ impl<W: Write> Encoder<W> {
     }
 
     // Only Pointer might take more than 2 bytes, if any do then the whole dict needs to be wide
-    fn _dict_should_be_wide(&self, dict: &value_stack::Dict) -> bool {
+    fn _dict_should_be_wide(dict: &value_stack::Dict) -> bool {
         for (k, v) in &dict.values {
             if k.value_type() == ValueType::Pointer {
                 let pointer = Pointer::from_value(k.as_value());
@@ -251,10 +247,10 @@ impl<W: Write> Encoder<W> {
         false
     }
 
-    fn _fix_pointer(&self, pointer: &SizedValue, len: usize, is_wide: bool) -> SizedValue {
+    #[allow(clippy::cast_possible_truncation)]
+    fn _fix_pointer(pointer: &SizedValue, len: usize, is_wide: bool) -> SizedValue {
         let pointer = Pointer::from_value(pointer.as_value());
-        let offset = unsafe { pointer.get_offset(is_wide) };
-        let offset = len - offset;
+        let offset = len - unsafe { pointer.get_offset(is_wide) };
         SizedValue::new_pointer(offset as u32).unwrap()
     }
 
@@ -262,7 +258,7 @@ impl<W: Write> Encoder<W> {
         let mut len = self.len;
         for v in &mut array.values {
             if v.value_type() == ValueType::Pointer {
-                let pointer = self._fix_pointer(v, len, is_wide);
+                let pointer = Encoder::<W>::_fix_pointer(v, len, is_wide);
                 *v = pointer;
             }
             if is_wide {
@@ -275,14 +271,14 @@ impl<W: Write> Encoder<W> {
 
     fn _fix_dict_pointers(&mut self, dict: &mut value_stack::Dict, is_wide: bool) {
         let mut len = self.len;
-        for (_, v) in &mut dict.values {
+        for v in &mut dict.values.values_mut() {
             if is_wide {
                 len += 8;
             } else {
                 len += 4;
             }
             if v.value_type() == ValueType::Pointer {
-                let pointer = self._fix_pointer(v, len, is_wide);
+                let pointer = Encoder::<W>::_fix_pointer(v, len, is_wide);
                 *v = pointer;
             }
         }
@@ -297,6 +293,7 @@ impl<W: Write> Encoder<W> {
                 let pointer = Pointer::from_value(key.as_value());
 
                 let offset = unsafe { pointer.get_offset(key.is_wide()) };
+                #[allow(clippy::cast_possible_truncation)]
                 let offset = self._actual_pointer_offset(offset as u32);
                 let pointer = SizedValue::new_pointer(offset).unwrap();
                 self._write(&pointer, is_wide);

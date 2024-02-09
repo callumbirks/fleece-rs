@@ -9,7 +9,7 @@ fn decode_people(c: &mut Criterion) {
     c.bench_function("fleece_decode", |b| {
         b.iter(|| {
             let _ = Value::from_bytes(black_box(PEOPLE_ENCODED));
-        })
+        });
     });
 }
 
@@ -17,7 +17,7 @@ fn decode_people_unchecked(c: &mut Criterion) {
     c.bench_function("fleece_decode_unchecked", |b| {
         b.iter(|| {
             let _ = unsafe { Value::from_bytes_unchecked(black_box(PEOPLE_ENCODED)) };
-        })
+        });
     });
 }
 

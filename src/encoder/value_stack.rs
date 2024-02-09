@@ -1,6 +1,7 @@
 use crate::value::sized::SizedValue;
 use std::collections::BTreeMap;
 
+#[derive(Default)]
 pub struct CollectionStack {
     collections: Vec<Collection>,
 }
@@ -20,20 +21,12 @@ pub struct Dict {
     pub next_key: Option<SizedValue>,
 }
 
-impl<'a> CollectionStack {
+impl CollectionStack {
     // CollectionStack always starts with a Dict
     pub fn new() -> Self {
         Self {
             collections: vec![Collection::Dict(Dict::new())],
         }
-    }
-
-    pub fn with_capacity(capacity: usize) -> Self {
-        let mut s = Self {
-            collections: Vec::with_capacity(capacity),
-        };
-        s.push_dict();
-        s
     }
 
     pub fn len(&self) -> usize {
@@ -55,9 +48,7 @@ impl<'a> CollectionStack {
     pub fn push_array(&mut self, capacity: usize) -> Option<()> {
         if let Some(Collection::Dict(dict)) = self.top() {
             // If the current collection is a dict it should have a key to correspond to this array
-            if dict.next_key.is_none() {
-                return None;
-            }
+            dict.next_key.as_ref()?;
         }
         self.collections
             .push(Collection::Array(Array::with_capacity(capacity)));
@@ -67,9 +58,7 @@ impl<'a> CollectionStack {
     pub fn push_dict(&mut self) -> Option<()> {
         if let Some(Collection::Dict(dict)) = self.top() {
             // If the current collection is a dict it should have a key to correspond to this dict
-            if dict.next_key.is_none() {
-                return None;
-            }
+            dict.next_key.as_ref()?;
         }
         self.collections.push(Collection::Dict(Dict::new()));
         Some(())

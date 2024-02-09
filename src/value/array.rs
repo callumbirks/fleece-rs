@@ -28,7 +28,7 @@ impl Array {
         }
 
         #[allow(clippy::cast_possible_wrap)]
-        let target = unsafe { self.value.offset_unchecked(2 + offset as isize, width) };
+        let target = unsafe { self.value._offset_unchecked(2 + offset as isize, width) };
         Some(if target.value_type() == ValueType::Pointer {
             unsafe { Pointer::from_value(target).deref_unchecked(self.is_wide()) }
         } else {
@@ -40,7 +40,8 @@ impl Array {
     pub(super) unsafe fn get_unchecked(&self, index: usize) -> &Value {
         let width = self.width();
         let offset = index * width as usize;
-        let target = self.value.offset_unchecked(2 + offset as isize, width);
+        #[allow(clippy::cast_possible_wrap)]
+        let target = self.value._offset_unchecked(2 + offset as isize, width);
         if target.value_type() == ValueType::Pointer {
             Pointer::from_value(target).deref_unchecked(self.is_wide())
         } else {
@@ -56,7 +57,7 @@ impl Array {
     }
 
     unsafe fn first_unchecked(&self) -> &Value {
-        self.value.offset_unchecked(2, self.width())
+        self.value._offset_unchecked(2, self.width())
     }
 
     pub fn is_wide(&self) -> bool {
@@ -102,8 +103,8 @@ impl Array {
 
         for _ in 0..elem_count {
             let next = unsafe { current.add(width) };
-            if let Some(current_value) = Value::from_raw(current, width) {
-                if unlikely(!current_value.validate::<true>(is_wide, data_start, next)) {
+            if let Some(current_value) = Value::_from_raw(current, width) {
+                if unlikely(!current_value._validate::<true>(is_wide, data_start, next)) {
                     return false;
                 }
             } else {
@@ -148,7 +149,7 @@ impl<'a> Iterator for Iter<'a> {
             current
         };
 
-        self.next = Some(unsafe { current.offset_unchecked(self.width as isize, self.width) });
+        self.next = Some(unsafe { current._offset_unchecked(self.width as isize, self.width) });
         self.index += 1;
 
         Some(current)

@@ -20,7 +20,8 @@ impl SizedValue {
         if offset > pointer::MAX_WIDE {
             return None;
         }
-        if offset <= pointer::MAX_NARROW as u32 {
+        if offset <= u32::from(pointer::MAX_NARROW) {
+            #[allow(clippy::cast_possible_truncation)]
             let mut bytes: [u8; 2] = (offset as u16 >> 1).to_be_bytes();
             bytes[0] |= tag::POINTER;
             Some(Self::from_narrow(bytes))

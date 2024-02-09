@@ -7,9 +7,9 @@ pub(crate) mod sized;
 pub(crate) mod varint;
 
 use crate::value::pointer::Pointer;
+use crate::{likely, unlikely};
 use std::cmp::Ordering;
 use std::fmt::{Display, Formatter};
-use crate::{likely, unlikely};
 
 #[repr(transparent)]
 pub struct Value {
@@ -113,22 +113,25 @@ pub mod constants {
 
 // API
 impl Value {
-    #[must_use] pub fn len(&self) -> usize {
+    #[must_use]
+    pub fn len(&self) -> usize {
         self.bytes.len()
     }
 
-    #[must_use] pub fn is_empty(&self) -> bool {
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
         self.bytes.is_empty()
     }
 
     /// Find and validate Fleece data in the given data. It will return a reference to the root
     /// value. The root value will usually be a Dict.
-    #[must_use] pub fn from_bytes(data: &[u8]) -> Option<&Self> {
-        let root = Self::find_root(data)?;
+    #[must_use]
+    pub fn from_bytes(data: &[u8]) -> Option<&Self> {
+        let root = Self::_find_root(data)?;
         let data_end = unsafe { data.as_ptr().add(data.len()) };
         // wide parameter doesn't matter here, as its only used for pointers, and find_root will
         // never return a pointer.
-        if likely(root.validate::<false>(false, data.as_ptr(), data_end)) {
+        if likely(root._validate::<false>(false, data.as_ptr(), data_end)) {
             Some(root)
         } else {
             None
@@ -143,7 +146,8 @@ impl Value {
     /// The caller should ensure the data is valid Fleece data.
     /// # Panics
     /// If the data is invalid Fleece data.
-    #[must_use] pub unsafe fn from_bytes_unchecked(data: &[u8]) -> &Self {
+    #[must_use]
+    pub unsafe fn from_bytes_unchecked(data: &[u8]) -> &Self {
         // Root is 2 bytes at the end of the data
         let root = &data[(data.len() - 2)..];
         let root: &Value = std::mem::transmute(root);
@@ -158,7 +162,8 @@ impl Value {
     // Will cause a panic if bytes is empty
     #[allow(clippy::inline_always)]
     #[inline(always)]
-    #[must_use] pub fn value_type(&self) -> ValueType {
+    #[must_use]
+    pub fn value_type(&self) -> ValueType {
         ValueType::from_byte(self.bytes[0])
     }
 }
@@ -166,6 +171,7 @@ impl Value {
 // Into Conversions
 impl Value {
     // False is false, Numbers not equal to 0 are false, everything else is true
+    #[must_use]
     pub fn to_bool(&self) -> bool {
         match self.value_type() {
             ValueType::False => false,
@@ -180,13 +186,15 @@ impl Value {
 
     #[allow(clippy::match_same_arms)]
     #[allow(clippy::cast_possible_truncation)]
+    #[allow(clippy::cast_possible_wrap)]
+    #[must_use]
     pub fn to_short(&self) -> i16 {
         match self.value_type() {
             ValueType::True => 1,
             ValueType::False => 0,
             // Short is always negative, so sign extend it.
             ValueType::Short => {
-                let i = self.get_short();
+                let i = self._get_short();
                 if i & 0x0800 != 0 {
                     (i | 0xF000) as i16
                 } else {
@@ -202,6 +210,7 @@ impl Value {
     #[allow(clippy::match_same_arms)]
     #[allow(clippy::cast_possible_wrap)]
     #[allow(clippy::cast_possible_truncation)]
+    #[must_use]
     pub fn to_int(&self) -> i64 {
         match self.value_type() {
             ValueType::True => 1,
@@ -219,12 +228,12 @@ impl Value {
     }
 
     #[allow(clippy::cast_sign_loss)]
-    pub fn to_unsigned_int(&self) -> u64 {
+    #[must_use] pub fn to_unsigned_int(&self) -> u64 {
         self.to_int() as u64
     }
 
     #[allow(clippy::cast_precision_loss)]
-    pub fn to_double(&self) -> f64 {
+    #[must_use] pub fn to_double(&self) -> f64 {
         match self.value_type() {
             ValueType::Float | ValueType::Double32 => {
                 let mut buf = [0u8; 4];
@@ -241,20 +250,20 @@ impl Value {
     }
 
     #[allow(clippy::cast_possible_truncation)]
-    pub fn to_float(&self) -> f32 {
+    #[must_use] pub fn to_float(&self) -> f32 {
         self.to_double() as f32
     }
 
-    pub fn to_data(&self) -> &[u8] {
+    #[must_use] pub fn to_data(&self) -> &[u8] {
         match self.value_type() {
-            ValueType::String | ValueType::Data => self.get_data(),
+            ValueType::String | ValueType::Data => self._get_data(),
             _ => &[],
         }
     }
 
-    pub fn to_str(&self) -> &str {
+    #[must_use] pub fn to_str(&self) -> &str {
         match self.value_type() {
-            ValueType::String => std::str::from_utf8(self.get_data()).unwrap_or(""),
+            ValueType::String => std::str::from_utf8(self._get_data()).unwrap_or(""),
             _ => "",
         }
     }
@@ -262,7 +271,8 @@ impl Value {
 
 // Conversion to equivalent types
 impl Value {
-    #[must_use] pub fn as_array(&self) -> Option<&array::Array> {
+    #[must_use]
+    pub fn as_array(&self) -> Option<&array::Array> {
         if likely(self.value_type() == ValueType::Array) {
             Some(array::Array::from_value(self))
         } else {
@@ -270,7 +280,8 @@ impl Value {
         }
     }
 
-    #[must_use] pub fn as_dict(&self) -> Option<&dict::Dict> {
+    #[must_use]
+    pub fn as_dict(&self) -> Option<&dict::Dict> {
         if likely(self.value_type() == ValueType::Dict) {
             Some(dict::Dict::from_value(self))
         } else {
@@ -285,7 +296,7 @@ impl Value {
     /// correctly sized. To ensure the validity of the Fleece data, one should also call `RawValue::validate()`
     #[allow(clippy::inline_always)]
     #[inline(always)]
-    fn find_root(data: &[u8]) -> Option<&Self> {
+    fn _find_root(data: &[u8]) -> Option<&Self> {
         // Data must be at least 2 bytes, and evenly sized
         if unlikely(data.is_empty() || data.len() % 2 != 0) {
             return None;
@@ -302,7 +313,7 @@ impl Value {
         None
     }
 
-    pub(super) fn validate<const IS_ARR_ELEM: bool>(
+    pub(super) fn _validate<const IS_ARR_ELEM: bool>(
         &self,
         wide: bool,
         data_start: *const u8,
@@ -314,7 +325,7 @@ impl Value {
             }
             ValueType::Pointer => {
                 if let Some(target) = Pointer::from_value(self).deref(wide, data_start) {
-                    likely(target.validate::<false>(wide, data_start, self.bytes.as_ptr()))
+                    likely(target._validate::<false>(wide, data_start, self.bytes.as_ptr()))
                 } else {
                     false
                 }
@@ -334,7 +345,7 @@ impl Value {
     // The number of bytes required to hold this value
     // For Dict and Array, this does not include the size of inline values, only the header
     #[allow(clippy::match_same_arms)]
-    pub fn required_size(&self) -> usize {
+    #[must_use] pub fn required_size(&self) -> usize {
         match self.value_type() {
             ValueType::Null
             | ValueType::Undefined
@@ -345,7 +356,7 @@ impl Value {
             ValueType::Float | ValueType::Double32 => 6,
             ValueType::Double64 => 10,
             ValueType::String | ValueType::Data => {
-                let data = self.get_data();
+                let data = self._get_data();
                 if let Some(last) = data.last() {
                     last as *const u8 as usize - self.bytes.as_ptr() as usize + 1
                 } else {
@@ -360,7 +371,7 @@ impl Value {
     }
 
     /// Converts a pointer to a `RawValue` reference, and validates its size
-    pub(super) fn from_raw<'a>(ptr: *const u8, available_size: usize) -> Option<&'a Value> {
+    pub(super) fn _from_raw<'a>(ptr: *const u8, available_size: usize) -> Option<&'a Value> {
         let target: &Value = unsafe {
             let slice = std::slice::from_raw_parts(ptr, available_size);
             std::mem::transmute(slice)
@@ -377,7 +388,7 @@ impl Value {
     /// The caller should ensure the target is a valid `RawValue`.
     #[allow(clippy::inline_always)]
     #[inline(always)]
-    pub(super) unsafe fn from_raw_unchecked<'a>(
+    pub(super) unsafe fn _from_raw_unchecked<'a>(
         ptr: *const u8,
         available_size: usize,
     ) -> &'a Value {
@@ -386,12 +397,12 @@ impl Value {
     }
 
     /// A convenience to offset self by `count` bytes, then transmute the result to a `RawValue`
-    /// with [`Value::from_raw_unchecked`].
+    /// with [`Value::_from_raw_unchecked`].
     #[allow(clippy::inline_always)]
     #[inline(always)]
-    pub(super) unsafe fn offset_unchecked(&self, count: isize, width: u8) -> &Value {
+    pub(super) unsafe fn _offset_unchecked(&self, count: isize, width: u8) -> &Value {
         let target_ptr = unsafe { self.bytes.as_ptr().offset(count) };
-        Value::from_raw_unchecked(target_ptr, width as usize)
+        Value::_from_raw_unchecked(target_ptr, width as usize)
     }
 }
 
@@ -399,14 +410,14 @@ impl Value {
 impl Value {
     #[allow(clippy::inline_always)]
     #[inline(always)]
-    fn get_short(&self) -> u16 {
+    fn _get_short(&self) -> u16 {
         let mut buf = [0u8; 2];
         buf.copy_from_slice(&self.bytes[0..2]);
         buf[0] &= 0x0F;
         u16::from_be_bytes(buf)
     }
 
-    fn get_data(&self) -> &[u8] {
+    fn _get_data(&self) -> &[u8] {
         if unlikely(self.bytes.is_empty()) {
             return &[];
         }
@@ -417,6 +428,7 @@ impl Value {
             if bytes_read == 0 {
                 return &[];
             }
+            #[allow(clippy::cast_possible_truncation)]
             let end = 1 + bytes_read + size as usize;
             &self.bytes[1 + bytes_read..end]
         } else {
@@ -512,7 +524,7 @@ impl Ord for Value {
 
 // Mutability
 impl Value {
-    pub fn is_mutable(&self) -> bool {
+    #[must_use] pub fn is_mutable(&self) -> bool {
         self.bytes.as_ptr() as usize & 1 != 0
     }
 }
