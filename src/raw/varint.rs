@@ -39,3 +39,12 @@ pub fn write(out: &mut [u8], value: u64) -> usize {
     out[bytes_written] = value as u8;
     bytes_written + 1
 }
+
+// The number of bytes required to write a varint with the given value
+pub fn size_required(value: usize) -> usize {
+    if value == 0 {
+        1
+    } else {
+        (63 - value.leading_zeros()) as usize / 7 + 1
+    }
+}

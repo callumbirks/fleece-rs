@@ -39,6 +39,7 @@ pub mod tag {
     pub const DATA: u8 = 0x50;
     pub const ARRAY: u8 = 0x60;
     pub const DICT: u8 = 0x70;
+    // Pointers are 0x80 to 0xF0
     pub const POINTER: u8 = 0x80;
 }
 
@@ -114,7 +115,7 @@ impl RawValue {
 
     /// Like `from_bytes`, but doesn't do any validation, so it should only be used on trusted data.
     /// If you call this on invalid Fleece data, it will probably panic.
-    /// The performance uplift of this function is several thousand times.
+    /// The performance uplift of this function is great, but must be used carefully.
     pub unsafe fn from_bytes_unchecked(data: &[u8]) -> &Self {
         // Root is 2 bytes at the end of the data
         let root = &data[(data.len() - 2)..];
@@ -143,9 +144,11 @@ impl RawValue {
     pub fn to_bool(&self) -> bool {
         match self.value_type() {
             ValueType::False => false,
-            ValueType::Short | ValueType::Int | ValueType::Float | ValueType::Double32 | ValueType::Double64 => {
-                self.to_int() != 0
-            }
+            ValueType::Short
+            | ValueType::Int
+            | ValueType::Float
+            | ValueType::Double32
+            | ValueType::Double64 => self.to_int() != 0,
             _ => true,
         }
     }
@@ -159,12 +162,12 @@ impl RawValue {
             // Short is always negative, so sign extend it.
             ValueType::Short => {
                 let i = self.get_short();
-                if i & 0x08 != 0 {
+                if i & 0x0800 != 0 {
                     (i | 0xF000) as i16
                 } else {
                     i as i16
                 }
-            },
+            }
             ValueType::Int | ValueType::UnsignedInt => self.to_int() as i16,
             ValueType::Float | ValueType::Double32 | ValueType::Double64 => self.to_double() as i16,
             _ => 0,
@@ -357,7 +360,8 @@ impl RawValue {
     fn get_short(&self) -> u16 {
         let mut buf = [0u8; 2];
         buf.copy_from_slice(&self.bytes[0..2]);
-        u16::from_be_bytes(buf) & 0x0FFF
+        buf[0] &= 0x0F;
+        u16::from_be_bytes(buf)
     }
 
     fn get_data(&self) -> &[u8] {

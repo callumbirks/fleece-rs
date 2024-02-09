@@ -2,9 +2,13 @@ use super::value::{RawValue, ValueType};
 
 /// Internally identical to `RawValue`, this is just used to separate out some functionality.
 #[repr(transparent)]
-pub(super) struct ValuePointer {
+pub(crate) struct ValuePointer {
     value: RawValue,
 }
+
+// The maximum offset that can be stored by a Fleece pointer, while being able to fit the tag, and the external tag
+pub const MAX_NARROW: u16 = 0x3fff;
+pub const MAX_WIDE: u32 = 0x3fff_ffff;
 
 impl ValuePointer {
     #[allow(clippy::inline_always)]
@@ -83,7 +87,7 @@ impl ValuePointer {
 
     #[allow(clippy::inline_always)]
     #[inline(always)]
-    unsafe fn get_offset<const WIDE: bool>(&self) -> usize {
+    pub unsafe fn get_offset<const WIDE: bool>(&self) -> usize {
         if WIDE {
             let mut buf = [0u8; 4];
             buf.copy_from_slice(&self.value.bytes[0..4]);
