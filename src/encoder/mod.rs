@@ -43,13 +43,6 @@ impl<'a> Encoder<Vec<u8>> {
             len: 0,
         }
     }
-
-    pub fn finish_bytes(mut self) -> Box<[u8]> {
-        self._end();
-        // Shrink because `into_boxed_slice` will allocate a new buffer if the capacity is greater than the length
-        self.out.shrink_to_fit();
-        self.out.into_boxed_slice()
-    }
 }
 
 impl<'a, W: Write> Encoder<W> {
@@ -171,13 +164,14 @@ impl<'a, W: Write> Encoder<W> {
         Some(())
     }
 
-    pub fn shared_keys(&self) -> Option<SharedKeys> {
-        self.shared_keys.clone()
-    }
-
-    pub fn finish(mut self) {
+    pub fn finish(mut self) -> W {
         self._end();
         self.out.flush().ok();
+        self.out
+    }
+
+    pub fn shared_keys(&self) -> Option<SharedKeys> {
+        self.shared_keys.clone()
     }
 
     /// Consumes the shared keys given, so they can be safely appended to. When the encoder is finished, call

@@ -34,7 +34,7 @@ fn encode_person() {
     let mut encoder = Encoder::new();
     encoder.write_key("name").expect("Failed to write key!");
     encoder.write_value("Alice").expect("Failed to write value!");
-    let res = encoder.finish_bytes();
+    let res = encoder.finish();
 
     let value = Value::from_bytes(&res).expect("Failed to decode encoded value!");
     assert!(matches!(value, Value::Dict { .. }));

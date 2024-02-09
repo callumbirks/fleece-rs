@@ -8,6 +8,7 @@ mod value;
 //#[cfg(feature = "serde")]
 
 pub use value::Value;
+pub use encoder::Encoder;
 
 mod sharedkeys;
 #[cfg(test)]
