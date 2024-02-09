@@ -1,6 +1,7 @@
 use crate::encoder::Encoder;
 use crate::Value;
 use std::collections::HashMap;
+use std::io::Write;
 use std::rc::Rc;
 use std::sync::RwLock;
 
@@ -37,7 +38,7 @@ impl SharedKeys {
         for val in state {
             debug_assert!(val.is_string());
             let borrowed_key = val.as_string()?;
-            shared_keys.insert(borrowed_key);
+            shared_keys.encode_and_insert(borrowed_key)?;
         }
         Some(shared_keys)
     }
@@ -45,14 +46,14 @@ impl SharedKeys {
     pub fn get_state_bytes(&self) -> Box<[u8]> {
         let mut encoder = Encoder::new();
         self.write_state(&mut encoder);
-        encoder.finish()
+        encoder.finish_bytes()
     }
 
-    pub fn write_state(&self, encoder: &mut Encoder) -> Option<()> {
+    pub fn write_state(&self, encoder: &mut Encoder<impl Write>) -> Option<()> {
         let _read_guard = self.lock.read().unwrap();
         encoder.begin_array(self.len as usize);
         for key in self.map.keys() {
-            encoder.write::<_, str>(key)?;
+            encoder.write_value::<_, str>(key)?;
         }
         encoder.end_array();
         Some(())
@@ -73,11 +74,13 @@ impl SharedKeys {
     }
 
     /// Fetch the int key corresponding to the given string key, create it if it doesn't exist
-    pub fn encode_and_insert(&mut self, string_key: &str) -> Option<u16> {
-        if let Some(key) = self.encode(string_key) {
-            return Some(key);
+    pub fn encode_and_insert(&mut self, key: &str) -> Option<u16> {
+        debug_assert!(self.can_add(key));
+        if !self.can_add(key) {
+            return None;
         }
-        self.insert(string_key)
+        let owned_key = Rc::from(key);
+        self._insert_owned_key(&owned_key)
     }
 
     pub fn decode(&self, int_key: u16) -> Option<&str> {
@@ -88,14 +91,14 @@ impl SharedKeys {
         None
     }
 
-    fn can_add(&self, key: &str) -> bool {
+    pub fn can_add(&self, key: &str) -> bool {
         let _read_guard = self.lock.read().unwrap();
         self.len < SharedKeys::MAX_KEYS
             && key.len() <= SharedKeys::MAX_KEY_LENGTH as usize
             && SharedKeys::can_encode(key)
     }
 
-    fn can_encode(key: &str) -> bool {
+    pub fn can_encode(key: &str) -> bool {
         for c in key.chars() {
             if !c.is_alphanumeric() && c != '_' && c != '-' {
                 return false;
@@ -104,16 +107,7 @@ impl SharedKeys {
         true
     }
 
-    pub fn insert(&mut self, key: &str) -> Option<u16> {
-        debug_assert!(self.can_add(key));
-        if !self.can_add(key) {
-            return None;
-        }
-        let owned_key = Rc::from(key);
-        self.insert_owned_key(&owned_key)
-    }
-
-    fn insert_owned_key(&mut self, key: &Rc<str>) -> Option<u16> {
+    fn _insert_owned_key(&mut self, key: &Rc<str>) -> Option<u16> {
         // Unwrap is safe here, because `write` only errors if the lock is poisoned, which can only
         // happen if a panic occurs while holding the lock. We don't panic while holding the lock
         let _write_guard = self.lock.write().unwrap();
@@ -125,5 +119,16 @@ impl SharedKeys {
         self.reverse_map.insert(value, key.clone())?;
         self.len += 1;
         Some(value)
+    }
+}
+
+impl Clone for SharedKeys {
+    fn clone(&self) -> Self {
+        Self {
+            map: self.map.clone(),
+            reverse_map: self.reverse_map.clone(),
+            lock: RwLock::new(()),
+            len: self.len,
+        }
     }
 }

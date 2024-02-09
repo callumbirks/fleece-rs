@@ -2,7 +2,6 @@
 
 use super::{array::RawArray, pointer::ValuePointer, varint};
 use std::fmt::{Display, Formatter};
-use std::io::Write;
 
 #[repr(transparent)]
 pub struct RawValue {
@@ -163,7 +162,7 @@ impl RawValue {
             // Short is always negative, so sign extend it.
             ValueType::Short => {
                 let i = self.get_short();
-                if i & 0x08 != 0 {
+                if i & 0x0800 != 0 {
                     (i | 0xF000) as i16
                 } else {
                     i as i16
@@ -361,7 +360,8 @@ impl RawValue {
     fn get_short(&self) -> u16 {
         let mut buf = [0u8; 2];
         buf.copy_from_slice(&self.bytes[0..2]);
-        u16::from_be_bytes(buf) & 0x0FFF
+        buf[0] &= 0x0F;
+        u16::from_be_bytes(buf)
     }
 
     fn get_data(&self) -> &[u8] {

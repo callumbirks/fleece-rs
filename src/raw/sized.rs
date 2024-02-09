@@ -1,40 +1,31 @@
-use crate::encoder::Encodable;
-use crate::raw::value::{RawValue, ValueType};
-use std::io::Write;
+use crate::raw::pointer;
+use crate::raw::value::{tag, RawValue, ValueType};
 
-pub enum SizedValue {
-    Narrow(NarrowValue),
-    Wide(WideValue),
+#[derive(Eq, PartialEq, Hash, Clone)]
+pub struct SizedValue {
+    pub bytes: [u8; 4],
 }
 
-impl Encodable for SizedValue {
-    fn write_fleece_to<W: Write>(&self, writer: &mut W) -> Option<()> {
-        match self {
-            SizedValue::Narrow(narrow) => writer.write_all(&narrow.bytes).ok(),
-            SizedValue::Wide(wide) => writer.write_all(&wide.bytes).ok(),
-        }
-    }
-
-    fn fleece_size(&self) -> usize {
-        match self {
-            SizedValue::Narrow(_) => 2,
-            SizedValue::Wide(_) => 4,
-        }
-    }
-}
-
-pub struct NarrowValue {
-    bytes: [u8; 2],
-}
-
-pub struct WideValue {
-    bytes: [u8; 4],
-}
-
-impl NarrowValue {
-    pub fn new(tag: u8, tiny: u8, short: u8) -> Self {
+impl SizedValue {
+    pub fn from_narrow(narrow: [u8; 2]) -> Self {
         Self {
-            bytes: [tag | tiny, short],
+            bytes: [narrow[0], narrow[1], 0, 0],
+        }
+    }
+
+    pub fn new_pointer(offset: u32) -> Option<Self> {
+        // TODO: Is this check necessary?
+        if offset > pointer::MAX_WIDE {
+            return None;
+        }
+        if offset <= pointer::MAX_NARROW as u32 {
+            let mut bytes: [u8; 2] = (offset as u16 >> 1).to_be_bytes();
+            bytes[0] |= tag::POINTER;
+            Some(Self::from_narrow(bytes))
+        } else {
+            let mut bytes: [u8; 4] = (offset >> 1).to_be_bytes();
+            bytes[0] |= tag::POINTER;
+            Some(Self { bytes })
         }
     }
 
@@ -46,33 +37,12 @@ impl NarrowValue {
         unsafe { std::mem::transmute(&self.bytes as &[u8]) }
     }
 
-    pub fn as_bytes(&self) -> &[u8; 2] {
-        &self.bytes
-    }
-
-    pub fn widen(self) -> WideValue {
-        WideValue {
-            bytes: [self.bytes[0], self.bytes[1], 0, 0],
-        }
-    }
-}
-
-impl WideValue {
-    fn new(tag: u8, tiny: u8, short: u8) -> Self {
-        Self {
-            bytes: [tag | tiny, short, 0, 0],
-        }
-    }
-
-    fn value_type(&self) -> ValueType {
-        ValueType::from_byte(self.bytes[0])
-    }
-
-    pub fn as_value(&self) -> &RawValue {
-        unsafe { std::mem::transmute(&self.bytes as &[u8]) }
-    }
-
     pub fn as_bytes(&self) -> &[u8; 4] {
         &self.bytes
+    }
+
+    // Only used for pointer, as Pointer is the only value stored inline which can be wide
+    pub fn is_wide(&self) -> bool {
+        self.bytes[2] != 0
     }
 }

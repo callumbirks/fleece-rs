@@ -1,14 +1,28 @@
 use crate::encoder::Encodable;
-use crate::raw::sized::{NarrowValue, SizedValue};
+use crate::raw::sized::SizedValue;
 use crate::raw::value::tag;
 use std::collections::HashMap;
 use std::io::Write;
 
-pub struct CollectionStack<'a> {
-    collections: Vec<Collection<'a>>,
+pub struct CollectionStack {
+    collections: Vec<Collection>,
 }
 
-impl<'a> CollectionStack<'a> {
+pub enum Collection {
+    Array(Array),
+    Dict(Dict),
+}
+
+pub struct Array {
+    pub values: Vec<SizedValue>,
+}
+
+pub struct Dict {
+    pub values: HashMap<SizedValue, SizedValue>,
+    pub next_key: Option<SizedValue>,
+}
+
+impl<'a> CollectionStack {
     // CollectionStack always starts with a Dict
     pub fn new() -> Self {
         Self {
@@ -16,90 +30,108 @@ impl<'a> CollectionStack<'a> {
         }
     }
 
-    pub fn push_array(&mut self) -> Option<()> {
-        self.collections.push(Collection::Array(Array::new()));
-        Some(())
+    pub fn with_capacity(capacity: usize) -> Self {
+        let mut s = Self {
+            collections: Vec::with_capacity(capacity),
+        };
+        s.push_dict(10);
+        s
     }
 
-    pub fn push_dict(&mut self) -> Option<()> {
-        self.collections.push(Collection::Dict(Dict::new()));
-        Some(())
+    pub fn len(&self) -> usize {
+        self.collections.len()
     }
 
-    pub fn pop_write<W: Write>(&mut self, writer: &mut W) -> Option<()> {
-        let collection = self.collections.pop()?;
-        collection.write_fleece_to(writer)
+    pub fn top(&self) -> Option<&Collection> {
+        self.collections.last()
     }
-}
 
-pub enum Collection<'a> {
-    Array(Array),
-    Dict(Dict<'a>),
-}
+    pub fn top_mut(&mut self) -> Option<&mut Collection> {
+        self.collections.last_mut()
+    }
 
-impl<'a> Encodable for Collection<'a> {
-    fn write_fleece_to<W: Write>(&self, writer: &mut W) -> Option<()> {
-        match self {
-            Collection::Array(arr) => arr.write_fleece_to(writer),
-            Collection::Dict(dict) => dict.write_fleece_to(writer),
+    pub fn empty(&self) -> bool {
+        self.collections.is_empty()
+    }
+
+    pub fn push_array(&mut self, capacity: usize) -> Option<()> {
+        if let Some(Collection::Dict(dict)) = self.top() {
+            // If the current collection is a dict it should have a key to correspond to this array
+            if dict.next_key.is_none() {
+                return None;
+            }
         }
+        self.collections.push(Collection::Array(Array::with_capacity(capacity)));
+        Some(())
     }
 
-    fn fleece_size(&self) -> usize {
-        2
+    pub fn push_dict(&mut self, capacity: usize) -> Option<()> {
+        if let Some(Collection::Dict(dict)) = self.top() {
+            // If the current collection is a dict it should have a key to correspond to this dict
+            if dict.next_key.is_none() {
+                return None;
+            }
+        }
+        self.collections.push(Collection::Dict(Dict::with_capacity(capacity)));
+        Some(())
     }
-}
 
-pub struct Array {
-    values: Vec<SizedValue>,
-}
-
-pub struct Dict<'a> {
-    values: HashMap<&'a str, SizedValue>,
+    pub fn pop(&mut self) -> Option<Collection> {
+        if let Some(Collection::Dict(dict)) = self.top() {
+            // Can't pop a dict if it has a key waiting for a value
+            if dict.next_key.is_some() {
+                return None;
+            }
+        }
+        self.collections.pop()
+    }
 }
 
 impl Array {
     pub fn new() -> Self {
         Self { values: vec![] }
     }
-}
 
-impl Encodable for Array {
-    fn write_fleece_to<W: Write>(&self, writer: &mut W) -> Option<()> {
-        let val = NarrowValue::new(tag::ARRAY, 0, self.values.len() as u8);
-        writer.write_all(val.as_bytes()).ok()?;
-        for v in &self.values {
-            v.write_fleece_to(writer)?;
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            values: Vec::with_capacity(capacity),
         }
-        Some(())
     }
 
-    // Don't bother to calculate the full size for this function because it isn't used
-    fn fleece_size(&self) -> usize {
-        2
+    pub fn push(&mut self, value: SizedValue) {
+        self.values.push(value);
     }
 }
 
-impl<'a> Dict<'a> {
+impl Dict {
     pub fn new() -> Self {
         Self {
             values: HashMap::new(),
+            next_key: None,
         }
     }
-}
 
-impl<'a> Encodable for Dict<'a> {
-    fn write_fleece_to<W: Write>(&self, writer: &mut W) -> Option<()> {
-        let val = NarrowValue::new(tag::DICT, 0, self.values.len() as u8);
-        writer.write_all(val.as_bytes()).ok()?;
-        for (k, v) in &self.values {
-            k.write_fleece_to(writer)?;
-            v.write_fleece_to(writer)?;
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            values: HashMap::with_capacity(capacity),
+            next_key: None,
         }
+    }
+
+    pub fn push_key(&mut self, key: SizedValue) -> Option<()> {
+        if self.next_key.is_some() {
+            return None;
+        }
+        if self.values.contains_key(&key) {
+            debug_assert!(false, "Duplicate key");
+            return None;
+        }
+        self.next_key = Some(key);
         Some(())
     }
 
-    fn fleece_size(&self) -> usize {
-        todo!()
+    pub fn push_value(&mut self, value: SizedValue) -> Option<()> {
+        self.values.insert(self.next_key.take()?, value);
+        Some(())
     }
 }
