@@ -1,25 +1,26 @@
-use super::value::{RawValue, ValueType};
+use crate::unlikely;
+use super::{Value, ValueType};
 
 /// Internally identical to `RawValue`, this is just used to separate out some functionality.
 #[repr(transparent)]
-pub(crate) struct ValuePointer {
-    value: RawValue,
+pub(crate) struct Pointer {
+    value: Value,
 }
 
 // The maximum offset that can be stored by a Fleece pointer, while being able to fit the tag, and the external tag
 pub const MAX_NARROW: u16 = 0x3fff;
 pub const MAX_WIDE: u32 = 0x3fff_ffff;
 
-impl ValuePointer {
+impl Pointer {
     #[allow(clippy::inline_always)]
     #[allow(clippy::transmute_ptr_to_ptr)]
     #[inline(always)]
-    pub fn from_value(value: &RawValue) -> &Self {
+    pub fn from_value(value: &Value) -> &Self {
         unsafe { std::mem::transmute(value) }
     }
 
-    pub(super) fn deref(&self, wide: bool, data_start: *const u8) -> Option<&RawValue> {
-        if wide {
+    pub(super) fn deref(&self, wide: bool, data_start: *const u8) -> Option<&Value> {
+        if unlikely(wide) {
             if self.value.bytes.len() < 4 {
                 return None;
             }
@@ -27,14 +28,8 @@ impl ValuePointer {
             return None;
         }
 
-        let offset = unsafe {
-            if wide {
-                self.get_offset::<true>()
-            } else {
-                self.get_offset::<false>()
-            }
-        };
-        if offset < 2 {
+        let offset = unsafe { self.get_offset(wide) };
+        if unlikely(offset < 2) {
             return None;
         }
 
@@ -43,38 +38,36 @@ impl ValuePointer {
         let target_ptr = unsafe { self.offset(-(offset as isize)) };
 
         // Is this pointer external to the source data?
-        if self.value.bytes[0] & 0x40 != 0 {
+        if unlikely(self.value.bytes[0] & 0x40 != 0) {
             // return resolve_external_pointer(target_ptr, data_start, data_end);
             unimplemented!()
-        // If the pointer isn't external, it should fit within the source data
-        } else if target_ptr < data_start {
+            // If the pointer isn't external, it should fit within the source data
+        } else if unlikely(target_ptr < data_start) {
             return None;
         }
 
-        let target = unsafe { RawValue::from_raw_unchecked(target_ptr, offset) };
+        let target = unsafe { Value::from_raw_unchecked(target_ptr, offset) };
 
-        if target.value_type() == ValueType::Pointer {
-            return ValuePointer::from_value(target).deref(true, data_start);
+        if unlikely(target.value_type() == ValueType::Pointer) {
+            return Pointer::from_value(target).deref(true, data_start);
         }
         Some(target)
     }
 
-    // This should only be called when the data has already been validated
-    pub(super) unsafe fn deref_unchecked(&self, wide: bool) -> &RawValue {
-        let offset = if wide {
-            self.get_offset::<true>()
-        } else {
-            self.get_offset::<false>()
-        };
+    /// Dereferences the pointer, returning the value it points to.
+    /// # Safety
+    /// The data should be validated before calling this function.
+    pub(super) unsafe fn deref_unchecked(&self, wide: bool) -> &Value {
+        let offset = unsafe { self.get_offset(wide) };
         debug_assert_ne!(offset, 0);
 
         #[allow(clippy::cast_possible_wrap)]
         let target_ptr = self.offset(-(offset as isize));
 
-        let target = RawValue::from_raw_unchecked(target_ptr, offset);
+        let target = Value::from_raw_unchecked(target_ptr, offset);
 
-        if target.value_type() == ValueType::Pointer {
-            return ValuePointer::from_value(target).deref_unchecked(true);
+        if unlikely(target.value_type() == ValueType::Pointer) {
+            return Pointer::from_value(target).deref_unchecked(true);
         }
         target
     }
@@ -87,8 +80,8 @@ impl ValuePointer {
 
     #[allow(clippy::inline_always)]
     #[inline(always)]
-    pub unsafe fn get_offset<const WIDE: bool>(&self) -> usize {
-        if WIDE {
+    pub unsafe fn get_offset(&self, wide: bool) -> usize {
+        if wide {
             let mut buf = [0u8; 4];
             buf.copy_from_slice(&self.value.bytes[0..4]);
             ((u32::from_be_bytes(buf) & !0xC000_0000) << 1) as usize

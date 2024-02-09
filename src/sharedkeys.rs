@@ -1,10 +1,12 @@
 use crate::encoder::Encoder;
+use crate::value::ValueType;
 use crate::Value;
 use std::collections::HashMap;
 use std::io::Write;
 use std::rc::Rc;
 use std::sync::RwLock;
 
+#[derive(Default)]
 pub struct SharedKeys {
     map: HashMap<Rc<str>, u16>,
     reverse_map: HashMap<u16, Rc<str>>,
@@ -19,25 +21,20 @@ impl SharedKeys {
     const MAX_KEY_LENGTH: u16 = 16;
 
     pub fn new() -> Self {
-        Self {
-            map: HashMap::new(),
-            reverse_map: HashMap::new(),
-            lock: RwLock::new(()),
-            len: 0,
-        }
+        Self::default()
     }
 
     pub fn from_state_bytes(data: &[u8]) -> Option<Self> {
         let state_value = Value::from_bytes(data)?;
-        Self::from_state_value(&state_value)
+        Self::from_state_value(state_value)
     }
 
     pub fn from_state_value(value: &Value) -> Option<Self> {
         let state = value.as_array()?;
         let mut shared_keys = Self::new();
         for val in state {
-            debug_assert!(val.is_string());
-            let borrowed_key = val.as_string()?;
+            debug_assert!(val.value_type() == ValueType::String);
+            let borrowed_key = val.to_str();
             shared_keys.encode_and_insert(borrowed_key)?;
         }
         Some(shared_keys)
@@ -46,7 +43,10 @@ impl SharedKeys {
     pub fn get_state_bytes(&self) -> Box<[u8]> {
         let mut encoder = Encoder::new();
         self.write_state(&mut encoder);
-        encoder.finish_bytes()
+        let mut vec = encoder.finish();
+        // Shrink to fit hopefully avoids `into_boxed_slice` allocating a new buffer
+        vec.shrink_to_fit();
+        vec.into_boxed_slice()
     }
 
     pub fn write_state(&self, encoder: &mut Encoder<impl Write>) -> Option<()> {

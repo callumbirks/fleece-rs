@@ -1,5 +1,5 @@
 mod encoder;
-mod raw;
+mod sharedkeys;
 mod value;
 
 // Example of modules
@@ -7,9 +7,24 @@ mod value;
 //mod datetime;
 //#[cfg(feature = "serde")]
 
-pub use value::Value;
 pub use encoder::Encoder;
+pub use value::Value;
 
-mod sharedkeys;
+#[inline]
+#[cold]
+pub(crate) fn cold() {}
+
+#[inline]
+pub(crate) fn likely(b: bool) -> bool {
+    if !b { cold() }
+    b
+}
+
+#[inline]
+pub(crate) fn unlikely(b: bool) -> bool {
+    if b { cold() }
+    b
+}
+
 #[cfg(test)]
 mod tests;

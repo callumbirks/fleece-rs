@@ -1,8 +1,5 @@
-use crate::encoder::Encodable;
-use crate::raw::sized::SizedValue;
-use crate::raw::value::tag;
-use std::collections::HashMap;
-use std::io::Write;
+use crate::value::sized::SizedValue;
+use std::collections::BTreeMap;
 
 pub struct CollectionStack {
     collections: Vec<Collection>,
@@ -17,8 +14,9 @@ pub struct Array {
     pub values: Vec<SizedValue>,
 }
 
+// Dict uses a BTreeMap because they are naturally sorted
 pub struct Dict {
-    pub values: HashMap<SizedValue, SizedValue>,
+    pub values: BTreeMap<SizedValue, SizedValue>,
     pub next_key: Option<SizedValue>,
 }
 
@@ -34,7 +32,7 @@ impl<'a> CollectionStack {
         let mut s = Self {
             collections: Vec::with_capacity(capacity),
         };
-        s.push_dict(10);
+        s.push_dict();
         s
     }
 
@@ -61,18 +59,19 @@ impl<'a> CollectionStack {
                 return None;
             }
         }
-        self.collections.push(Collection::Array(Array::with_capacity(capacity)));
+        self.collections
+            .push(Collection::Array(Array::with_capacity(capacity)));
         Some(())
     }
 
-    pub fn push_dict(&mut self, capacity: usize) -> Option<()> {
+    pub fn push_dict(&mut self) -> Option<()> {
         if let Some(Collection::Dict(dict)) = self.top() {
             // If the current collection is a dict it should have a key to correspond to this dict
             if dict.next_key.is_none() {
                 return None;
             }
         }
-        self.collections.push(Collection::Dict(Dict::with_capacity(capacity)));
+        self.collections.push(Collection::Dict(Dict::new()));
         Some(())
     }
 
@@ -106,14 +105,7 @@ impl Array {
 impl Dict {
     pub fn new() -> Self {
         Self {
-            values: HashMap::new(),
-            next_key: None,
-        }
-    }
-
-    pub fn with_capacity(capacity: usize) -> Self {
-        Self {
-            values: HashMap::with_capacity(capacity),
+            values: BTreeMap::new(),
             next_key: None,
         }
     }

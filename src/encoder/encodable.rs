@@ -1,7 +1,10 @@
 use crate::encoder::{Encodable, NullValue, UndefinedValue};
-use crate::raw::sized::{SizedValue};
-use crate::raw::{value, varint};
+use crate::value;
+use crate::value::sized::SizedValue;
+use crate::value::varint;
 use std::io::Write;
+
+/// All of the built-in implementations of [`Encodable`].
 
 impl Encodable for i64 {
     #[allow(clippy::cast_possible_truncation)]
@@ -80,11 +83,7 @@ impl Encodable for u16 {
             return u64::from(*self).write_fleece_to(writer, is_wide);
         }
         let val = self.to_value()?;
-        if is_wide {
-            writer.write_all(&val.bytes).ok()?; Some(4)
-        } else {
-            writer.write_all(&val.bytes[0..2]).ok()?; Some(2)
-        }
+        val.write_fleece_to(writer, is_wide)
     }
 
     fn fleece_size(&self) -> usize {
@@ -108,11 +107,7 @@ impl Encodable for i16 {
             return i64::from(*self).write_fleece_to(writer, is_wide);
         }
         let val = self.to_value()?;
-        if is_wide {
-            writer.write_all(&val.bytes).ok()?; Some(4)
-        } else {
-            writer.write_all(&val.bytes[0..2]).ok()?; Some(2)
-        }
+        val.write_fleece_to(writer, is_wide)
     }
 
     fn fleece_size(&self) -> usize {
@@ -127,7 +122,6 @@ impl Encodable for i16 {
         bytes[0] = (bytes[0] & 0x0F) | value::tag::SHORT;
         Some(SizedValue::from_narrow(bytes))
     }
-
 }
 
 impl Encodable for f32 {
@@ -146,7 +140,6 @@ impl Encodable for f32 {
     fn to_value(&self) -> Option<SizedValue> {
         None
     }
-
 }
 
 impl Encodable for f64 {
@@ -165,18 +158,28 @@ impl Encodable for f64 {
     fn to_value(&self) -> Option<SizedValue> {
         None
     }
+}
 
+fn write_fleece_constant<W: Write>(
+    writer: &mut W,
+    constant: &[u8; 2],
+    is_wide: bool,
+) -> Option<usize> {
+    if is_wide {
+        writer.write_all(constant).ok()?;
+        Some(4)
+    } else {
+        writer.write_all(constant).ok()?;
+        Some(2)
+    }
 }
 
 impl Encodable for bool {
     fn write_fleece_to<W: Write>(&self, writer: &mut W, is_wide: bool) -> Option<usize> {
-        let val = self.to_value()?;
-        if is_wide {
-            writer.write_all(&val.bytes).ok()?;
-            Some(4)
+        if *self {
+            write_fleece_constant(writer, &value::constants::TRUE, is_wide)
         } else {
-            writer.write_all(&val.bytes[0..2]).ok()?;
-            Some(2)
+            write_fleece_constant(writer, &value::constants::FALSE, is_wide)
         }
     }
 
@@ -191,19 +194,11 @@ impl Encodable for bool {
             Some(SizedValue::from_narrow(value::constants::FALSE))
         }
     }
-
 }
 
 impl Encodable for NullValue {
     fn write_fleece_to<W: Write>(&self, writer: &mut W, is_wide: bool) -> Option<usize> {
-        let val = self.to_value()?;
-        if is_wide {
-            writer.write_all(&val.bytes).ok()?;
-            Some(4)
-        } else {
-            writer.write_all(&val.bytes[0..2]).ok()?;
-            Some(2)
-        }
+        write_fleece_constant(writer, &value::constants::NULL, is_wide)
     }
 
     fn fleece_size(&self) -> usize {
@@ -213,19 +208,11 @@ impl Encodable for NullValue {
     fn to_value(&self) -> Option<SizedValue> {
         Some(SizedValue::from_narrow(value::constants::NULL))
     }
-
 }
 
 impl Encodable for UndefinedValue {
     fn write_fleece_to<W: Write>(&self, writer: &mut W, is_wide: bool) -> Option<usize> {
-        let val = self.to_value()?;
-        if is_wide {
-            writer.write_all(&val.bytes).ok()?;
-            Some(4)
-        } else {
-            writer.write_all(&val.bytes[0..2]).ok()?;
-            Some(2)
-        }
+        write_fleece_constant(writer, &value::constants::UNDEFINED, is_wide)
     }
 
     fn fleece_size(&self) -> usize {
@@ -235,11 +222,14 @@ impl Encodable for UndefinedValue {
     fn to_value(&self) -> Option<SizedValue> {
         Some(SizedValue::from_narrow(value::constants::UNDEFINED))
     }
-
 }
 
 // Data and String are encoded the same in Fleece, apart from the value type tag.
-fn write_fleece_string<W: Write, const IS_STR: bool>(string: &[u8], writer: &mut W, is_wide: bool) -> Option<usize> {
+fn write_fleece_string<W: Write, const IS_STR: bool>(
+    string: &[u8],
+    writer: &mut W,
+    is_wide: bool,
+) -> Option<usize> {
     let mut buf = [0_u8; 4];
     buf[0] = if IS_STR {
         value::tag::STRING
@@ -249,11 +239,25 @@ fn write_fleece_string<W: Write, const IS_STR: bool>(string: &[u8], writer: &mut
 
     match string.len() {
         // If size is 1 or 0, size fits in the tiny value and string fits in the second byte.
-        0 => if is_wide { writer.write_all(&buf).ok()?; Some(4) } else { writer.write_all(&buf[..2]).ok()?; Some(2) }
+        0 => {
+            if is_wide {
+                writer.write_all(&buf).ok()?;
+                Some(4)
+            } else {
+                writer.write_all(&buf[..2]).ok()?;
+                Some(2)
+            }
+        }
         1 => {
             buf[0] |= 1;
             buf[1] = string[0];
-            if is_wide { writer.write_all(&buf).ok()?; Some(4) } else { writer.write_all(&buf[..2]).ok()?; Some(2) }
+            if is_wide {
+                writer.write_all(&buf).ok()?;
+                Some(4)
+            } else {
+                writer.write_all(&buf[..2]).ok()?;
+                Some(2)
+            }
         }
         // If size is up to 0x0E (0x0F is the bit that indicates a varint), we can fit the size in the tiny value.
         #[allow(clippy::cast_possible_truncation)]
@@ -294,9 +298,9 @@ impl Encodable for [u8] {
 
     fn to_value(&self) -> Option<SizedValue> {
         match self.len() {
-            0 => Some(SizedValue{ bytes: [value::tag::DATA, 0, 0, 0] }),
-            1 => Some(SizedValue{ bytes: [value::tag::DATA | 0x01, self[0], 0, 0] }),
-            _ => None
+            0 => Some(SizedValue::from_narrow([value::tag::DATA, 0])),
+            1 => Some(SizedValue::from_narrow([value::tag::DATA | 0x01, self[0]])),
+            _ => None,
         }
     }
 }
@@ -312,12 +316,14 @@ impl Encodable for str {
 
     fn to_value(&self) -> Option<SizedValue> {
         match self.len() {
-            0 => Some(SizedValue{ bytes: [value::tag::STRING, 0, 0, 0] }),
-            1 => Some(SizedValue{ bytes: [value::tag::STRING | 0x01, self.as_bytes()[0], 0, 0] }),
-            _ => None
+            0 => Some(SizedValue::from_narrow([value::tag::STRING, 0])),
+            1 => Some(SizedValue::from_narrow([
+                value::tag::STRING | 0x01,
+                self.as_bytes()[0],
+            ])),
+            _ => None,
         }
     }
-
 }
 
 impl<T> Encodable for Option<T>
@@ -348,10 +354,10 @@ where
 impl Encodable for SizedValue {
     fn write_fleece_to<W: Write>(&self, writer: &mut W, is_wide: bool) -> Option<usize> {
         if is_wide {
-            writer.write_all(&self.bytes).ok()?;
+            writer.write_all(self.as_bytes()).ok()?;
             Some(4)
         } else {
-            writer.write_all(&self.bytes[0..2]).ok()?;
+            writer.write_all(&self.as_bytes()[..2]).ok()?;
             Some(2)
         }
     }

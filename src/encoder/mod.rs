@@ -1,11 +1,10 @@
 use crate::encoder::value_stack::{Collection, CollectionStack};
-use crate::raw::pointer;
-use crate::raw::pointer::ValuePointer;
-use crate::raw::sized::SizedValue;
-use crate::raw::value::{tag, ValueType};
 use crate::sharedkeys::SharedKeys;
+use crate::value::pointer::Pointer;
+use crate::value::sized::SizedValue;
+use crate::value::{pointer, tag, ValueType};
 use std::borrow::Borrow;
-use std::io::{Read, Write};
+use std::io::Write;
 
 mod encodable;
 mod value_stack;
@@ -15,10 +14,14 @@ struct UndefinedValue;
 
 // Implementations are in the `encodable` module
 pub trait Encodable {
-    /// Write self to the given writer, encoded as Fleece. Return [`None`] if the value is too large to be written.
+    /// Write self to the given writer, encoded as Fleece. Return [`None`] if any write operations fail.
     /// Return [`Some`] with the number of bytes written if the value was written successfully.
     fn write_fleece_to<W: Write>(&self, writer: &mut W, is_wide: bool) -> Option<usize>;
+    /// The number of bytes necessary to encode this value in Fleece.
     fn fleece_size(&self) -> usize;
+    /// Construct a [`SizedValue`] from this value, if this value can be represented in 2 bytes of Fleece. Otherwise,
+    /// return [`None`].
+    /// Use [`SizedValue::from_narrow`] to construct the value.
     fn to_value(&self) -> Option<SizedValue>;
 }
 
@@ -123,8 +126,8 @@ impl<'a, W: Write> Encoder<W> {
         Some(())
     }
 
-    pub fn begin_dict(&mut self, capacity: usize) {
-        self.collection_stack.push_dict(capacity);
+    pub fn begin_dict(&mut self) {
+        self.collection_stack.push_dict();
     }
 
     pub fn end_dict(&mut self) -> Option<()> {
@@ -235,12 +238,8 @@ impl<W: Write> Encoder<W> {
     fn _dict_should_be_wide(&self, dict: &value_stack::Dict) -> bool {
         for (k, v) in &dict.values {
             if k.value_type() == ValueType::Pointer {
-                let pointer = ValuePointer::from_value(k.as_value());
-                let offset = if k.is_wide() {
-                    unsafe { pointer.get_offset::<true>() }
-                } else {
-                    unsafe { pointer.get_offset::<false>() }
-                };
+                let pointer = Pointer::from_value(k.as_value());
+                let offset = unsafe { pointer.get_offset(k.is_wide()) };
                 if offset > pointer::MAX_NARROW as usize {
                     return true;
                 }
@@ -253,12 +252,8 @@ impl<W: Write> Encoder<W> {
     }
 
     fn _fix_pointer(&self, pointer: &SizedValue, len: usize, is_wide: bool) -> SizedValue {
-        let pointer = ValuePointer::from_value(pointer.as_value());
-        let offset = if is_wide {
-            unsafe { pointer.get_offset::<true>() }
-        } else {
-            unsafe { pointer.get_offset::<false>() }
-        };
+        let pointer = Pointer::from_value(pointer.as_value());
+        let offset = unsafe { pointer.get_offset(is_wide) };
         let offset = len - offset;
         SizedValue::new_pointer(offset as u32).unwrap()
     }
@@ -299,13 +294,9 @@ impl<W: Write> Encoder<W> {
                 self._write(key, is_wide);
             }
             ValueType::Pointer => {
-                let pointer = ValuePointer::from_value(key.as_value());
+                let pointer = Pointer::from_value(key.as_value());
 
-                let offset = if key.is_wide() {
-                    unsafe { pointer.get_offset::<true>() }
-                } else {
-                    unsafe { pointer.get_offset::<false>() }
-                };
+                let offset = unsafe { pointer.get_offset(key.is_wide()) };
                 let offset = self._actual_pointer_offset(offset as u32);
                 let pointer = SizedValue::new_pointer(offset).unwrap();
                 self._write(&pointer, is_wide);
