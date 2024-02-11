@@ -1,8 +1,9 @@
 use crate::encoder::value_stack::{Collection, CollectionStack};
 use crate::sharedkeys::SharedKeys;
+use crate::value;
 use crate::value::pointer::Pointer;
 use crate::value::sized::SizedValue;
-use crate::value::{pointer, tag, ValueType};
+use crate::value::{pointer, ValueType};
 use std::borrow::Borrow;
 use std::io::Write;
 
@@ -99,6 +100,61 @@ impl<W: Write> Encoder<W> {
         }
     }
 
+    pub fn write_fleece(&mut self, value: &value::Value) -> Option<()> {
+        // If the encoder has no open collections and the value is not a collection, return None
+        if self.collection_stack.empty()
+            && value.value_type() != ValueType::Dict
+            && value.value_type() != ValueType::Array
+        {
+            return None;
+        }
+        match value.value_type() {
+            ValueType::True => self._push(SizedValue::from_narrow(value::constants::TRUE)),
+            ValueType::False => self._push(SizedValue::from_narrow(value::constants::FALSE)),
+            ValueType::Null => self._push(SizedValue::from_narrow(value::constants::NULL)),
+            ValueType::Undefined => {
+                self._push(SizedValue::from_narrow(value::constants::UNDEFINED))
+            }
+            ValueType::Short => self.write_value(&value.to_short()),
+            ValueType::UnsignedInt => self.write_value(&value.to_unsigned_int()),
+            ValueType::Int => self.write_value(&value.to_int()),
+            ValueType::Float => self.write_value(&value.to_float()),
+            ValueType::Double32 | ValueType::Double64 => self.write_value(&value.to_double()),
+            ValueType::String => self.write_value(value.to_str()),
+            ValueType::Data => self.write_value(value.to_data()),
+            ValueType::Array => {
+                let value = value.as_array().unwrap();
+                self.begin_array(value.len());
+                for val in value {
+                    self.write_fleece(val)?;
+                }
+                self.end_array()
+            }
+            ValueType::Dict => {
+                let value = value.as_dict().unwrap();
+                self.begin_dict();
+                for elem in value {
+                    // TODO: SHARED KEYS (Short)
+                    let key = if elem.key.value_type() == ValueType::Pointer {
+                        unsafe {
+                            Pointer::from_value(elem.key)
+                                .deref_unchecked(false)
+                                .to_str()
+                        }
+                    } else {
+                        elem.key.to_str()
+                    };
+                    self.write_key(key);
+                    self.write_fleece(elem.val)?;
+                }
+                self.end_dict()
+            }
+            ValueType::Pointer => unsafe {
+                self.write_fleece(Pointer::from_value(value).deref_unchecked(false))
+            },
+        }
+    }
+
     pub fn begin_array(&mut self, capacity: usize) {
         self.collection_stack.push_array(capacity);
     }
@@ -108,14 +164,18 @@ impl<W: Write> Encoder<W> {
             return None;
         };
         let is_wide = Encoder::<W>::_array_should_be_wide(&array);
-        self._fix_array_pointers(&mut array, is_wide);
-        #[allow(clippy::cast_possible_truncation)]
-        let array_value = SizedValue::from_narrow([tag::ARRAY, array.values.len() as u8]);
-        self._write(&array_value, is_wide);
 
-        for v in array.values {
-            self._write(&v, is_wide);
+        // Write the Array header via `Encodable` trait
+        let offset = self._write(&array, is_wide)?;
+
+        self._fix_array_pointers(&mut array, is_wide);
+
+        for v in &array.values {
+            self._write(v, is_wide);
         }
+
+        self._finished_collection(offset);
+
         Some(())
     }
 
@@ -134,30 +194,26 @@ impl<W: Write> Encoder<W> {
             }
             _ => return None,
         }
-        let Collection::Dict(mut dict) = self.collection_stack.pop()? else {
+        let Some(Collection::Dict(mut dict)) = self.collection_stack.pop() else {
             unreachable!()
         };
-        // TODO: VARINT FOR LARGE DICTS
 
-        let offset_from_start = self.len;
+        let is_wide = self._dict_should_be_wide(&dict);
 
-        let is_wide = Encoder::<W>::_dict_should_be_wide(&dict);
+        // Write the Dict header via `Encodable` trait
+        let offset = self._write(&dict, is_wide)?;
+
+        dict.values.sort_unstable_by_key(| kv | kv.key.clone());
 
         self._fix_dict_pointers(&mut dict, is_wide);
 
-        let byte0 = if is_wide { tag::DICT | 0x08 } else { tag::DICT };
-        #[allow(clippy::cast_possible_truncation)]
-        let dict_value = SizedValue::from_narrow([byte0, dict.values.len() as u8]);
-        self._write(&dict_value, is_wide);
-
-        // TODO: SORT DICT
-        for (k, v) in &dict.values {
-            self._write_dict_key(k, is_wide);
-            self._write(v, is_wide);
+        for elem in &dict.values {
+            self._write(&elem.key, is_wide);
+            self._write(&elem.val, is_wide);
         }
 
         #[allow(clippy::cast_possible_truncation)]
-        self._finished_collection(offset_from_start as u32);
+        self._finished_collection(offset);
 
         Some(())
     }
@@ -210,9 +266,16 @@ impl<W: Write> Encoder<W> {
         }
     }
 
+    /// Close all open collections, discard any dangling keys
     fn _end(&mut self) {
-        if self.collection_stack.len() == 1 {
-            self.end_dict();
+        while let Some(collection) = self.collection_stack.top_mut() {
+            match collection {
+                Collection::Array(_) => self.end_array(),
+                Collection::Dict(dict) => {
+                    dict.next_key.take();
+                    self.end_dict()
+                }
+            };
         }
     }
 
@@ -231,75 +294,57 @@ impl<W: Write> Encoder<W> {
     }
 
     // Only Pointer might take more than 2 bytes, if any do then the whole dict needs to be wide
-    fn _dict_should_be_wide(dict: &value_stack::Dict) -> bool {
-        for (k, v) in &dict.values {
-            if k.value_type() == ValueType::Pointer {
-                let pointer = Pointer::from_value(k.as_value());
-                let offset = unsafe { pointer.get_offset(k.is_wide()) };
+    fn _dict_should_be_wide(&self, dict: &value_stack::Dict) -> bool {
+        let mut len = self.len;
+        for elem in &dict.values {
+            if elem.key.value_type() == ValueType::Pointer {
+                let pointer = Pointer::from_value(elem.key.as_value());
+                let offset = len - unsafe { pointer.get_offset(elem.key.is_wide()) };
                 if offset > pointer::MAX_NARROW as usize {
                     return true;
                 }
             }
-            if v.is_wide() {
+            if elem.val.is_wide() {
                 return true;
             }
+            len += 2;
         }
         false
     }
 
+    fn _fix_array_pointers(&self, array: &mut value_stack::Array, is_wide: bool) {
+        let mut len = self.len as u32;
+        for elem in &mut array.values {
+            if elem.value_type() == ValueType::Pointer {
+                let pointer = Encoder::<W>::_fix_pointer(elem, len, is_wide);
+                *elem = pointer;
+            }
+            len += if is_wide { 4 } else { 2 };
+        }
+    }
+
+    fn _fix_dict_pointers(&self, dict: &mut value_stack::Dict, is_wide: bool) {
+        let mut len = self.len as u32;
+        for elem in &mut dict.values {
+            if elem.key.value_type() == ValueType::Pointer {
+                let pointer = Encoder::<W>::_fix_pointer(&elem.key, len, is_wide);
+                elem.key = pointer;
+            }
+            len += if is_wide { 4 } else { 2 };
+            if elem.val.value_type() == ValueType::Pointer {
+                let pointer = Encoder::<W>::_fix_pointer(&elem.val, len, is_wide);
+                elem.val = pointer;
+            }
+            len += if is_wide { 4 } else { 2 };
+        }
+    }
+
     #[allow(clippy::cast_possible_truncation)]
-    fn _fix_pointer(pointer: &SizedValue, len: usize, is_wide: bool) -> SizedValue {
+    fn _fix_pointer(pointer: &SizedValue, len: u32, is_wide: bool) -> SizedValue {
         let pointer = Pointer::from_value(pointer.as_value());
-        let offset = len - unsafe { pointer.get_offset(is_wide) };
-        SizedValue::new_pointer(offset as u32).unwrap()
-    }
-
-    fn _fix_array_pointers(&mut self, array: &mut value_stack::Array, is_wide: bool) {
-        let mut len = self.len;
-        for v in &mut array.values {
-            if v.value_type() == ValueType::Pointer {
-                let pointer = Encoder::<W>::_fix_pointer(v, len, is_wide);
-                *v = pointer;
-            }
-            if is_wide {
-                len += 4;
-            } else {
-                len += 2;
-            }
-        }
-    }
-
-    fn _fix_dict_pointers(&mut self, dict: &mut value_stack::Dict, is_wide: bool) {
-        let mut len = self.len;
-        for v in &mut dict.values.values_mut() {
-            if is_wide {
-                len += 8;
-            } else {
-                len += 4;
-            }
-            if v.value_type() == ValueType::Pointer {
-                let pointer = Encoder::<W>::_fix_pointer(v, len, is_wide);
-                *v = pointer;
-            }
-        }
-    }
-
-    fn _write_dict_key(&mut self, key: &SizedValue, is_wide: bool) {
-        match key.value_type() {
-            ValueType::String | ValueType::Short => {
-                self._write(key, is_wide);
-            }
-            ValueType::Pointer => {
-                let pointer = Pointer::from_value(key.as_value());
-
-                let offset = unsafe { pointer.get_offset(key.is_wide()) };
-                #[allow(clippy::cast_possible_truncation)]
-                let offset = self._actual_pointer_offset(offset as u32);
-                let pointer = SizedValue::new_pointer(offset).unwrap();
-                self._write(&pointer, is_wide);
-            }
-            _ => unreachable!(),
-        }
+        let offset_from_start = unsafe { pointer.get_offset(is_wide) } as u32;
+        let offset = len - offset_from_start;
+        SizedValue::new_pointer(offset).unwrap()
     }
 
     fn _finished_collection(&mut self, offset_from_start: u32) {

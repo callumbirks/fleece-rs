@@ -54,7 +54,7 @@ impl Dict {
 
         // This binary search implementation is borrowed from https://doc.rust-lang.org/std/vec/struct.Vec.html#method.binary_search_by
 
-        let mut size = self.elem_count() / 2;
+        let mut size = self.len();
         let mut left = 0;
         let mut right = size;
         while left < right {
@@ -95,7 +95,7 @@ impl Dict {
 
     /// The first key-value pair in the dict
     pub fn first(&self) -> Option<Element> {
-        if self.elem_count() == 0 {
+        if self.len() == 0 {
             return None;
         }
         Some(unsafe { self.first_unchecked() })
@@ -113,8 +113,9 @@ impl Dict {
         self.array.width()
     }
 
-    pub fn elem_count(&self) -> usize {
-        self.array.elem_count()
+    /// The number of key-value pairs in this dict.
+    pub fn len(&self) -> usize {
+        self.array.len() / 2
     }
 }
 

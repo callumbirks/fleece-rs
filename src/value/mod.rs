@@ -2,14 +2,18 @@
 
 pub(crate) mod array;
 pub(crate) mod dict;
+mod error;
 pub(super) mod pointer;
 pub(crate) mod sized;
 pub(crate) mod varint;
 
+use crate::value::error::DecodeError;
+use crate::value::error::DecodeError::InputIncorrectlySized;
 use crate::value::pointer::Pointer;
 use crate::{likely, unlikely};
+use error::Result;
 use std::cmp::Ordering;
-use std::fmt::{Display, Formatter};
+use std::fmt::{Debug, Formatter};
 
 #[repr(transparent)]
 pub struct Value {
@@ -125,17 +129,13 @@ impl Value {
 
     /// Find and validate Fleece data in the given data. It will return a reference to the root
     /// value. The root value will usually be a Dict.
-    #[must_use]
-    pub fn from_bytes(data: &[u8]) -> Option<&Self> {
+    pub fn from_bytes(data: &[u8]) -> Result<&Self> {
         let root = Self::_find_root(data)?;
         let data_end = unsafe { data.as_ptr().add(data.len()) };
         // wide parameter doesn't matter here, as its only used for pointers, and find_root will
         // never return a pointer.
-        if likely(root._validate::<false>(false, data.as_ptr(), data_end)) {
-            Some(root)
-        } else {
-            None
-        }
+        root._validate::<false>(false, data.as_ptr(), data_end)?;
+        Ok(root)
     }
 
     /// Like `from_bytes`, but doesn't do any validation, so it should only be used on data that
@@ -228,12 +228,14 @@ impl Value {
     }
 
     #[allow(clippy::cast_sign_loss)]
-    #[must_use] pub fn to_unsigned_int(&self) -> u64 {
+    #[must_use]
+    pub fn to_unsigned_int(&self) -> u64 {
         self.to_int() as u64
     }
 
     #[allow(clippy::cast_precision_loss)]
-    #[must_use] pub fn to_double(&self) -> f64 {
+    #[must_use]
+    pub fn to_double(&self) -> f64 {
         match self.value_type() {
             ValueType::Float | ValueType::Double32 => {
                 let mut buf = [0u8; 4];
@@ -250,18 +252,21 @@ impl Value {
     }
 
     #[allow(clippy::cast_possible_truncation)]
-    #[must_use] pub fn to_float(&self) -> f32 {
+    #[must_use]
+    pub fn to_float(&self) -> f32 {
         self.to_double() as f32
     }
 
-    #[must_use] pub fn to_data(&self) -> &[u8] {
+    #[must_use]
+    pub fn to_data(&self) -> &[u8] {
         match self.value_type() {
             ValueType::String | ValueType::Data => self._get_data(),
             _ => &[],
         }
     }
 
-    #[must_use] pub fn to_str(&self) -> &str {
+    #[must_use]
+    pub fn to_str(&self) -> &str {
         match self.value_type() {
             ValueType::String => std::str::from_utf8(self._get_data()).unwrap_or(""),
             _ => "",
@@ -296,10 +301,10 @@ impl Value {
     /// correctly sized. To ensure the validity of the Fleece data, one should also call `RawValue::validate()`
     #[allow(clippy::inline_always)]
     #[inline(always)]
-    fn _find_root(data: &[u8]) -> Option<&Self> {
+    fn _find_root(data: &[u8]) -> Result<&Self> {
         // Data must be at least 2 bytes, and evenly sized
         if unlikely(data.is_empty() || data.len() % 2 != 0) {
-            return None;
+            return Err(InputIncorrectlySized);
         }
         // Root is 2 bytes at the end of the data
         let root = &data[(data.len() - 2)..];
@@ -308,9 +313,9 @@ impl Value {
         if likely(root.value_type() == ValueType::Pointer) {
             return Pointer::from_value(root).deref(false, data.as_ptr());
         } else if unlikely(data.len() == 2) {
-            return Some(root);
+            return Ok(root);
         }
-        None
+        Err(DecodeError::RootNotPointer)
     }
 
     pub(super) fn _validate<const IS_ARR_ELEM: bool>(
@@ -318,25 +323,30 @@ impl Value {
         wide: bool,
         data_start: *const u8,
         data_end: *const u8,
-    ) -> bool {
+    ) -> Result<()> {
         match self.value_type() {
             ValueType::Array | ValueType::Dict => {
-                likely(array::Array::from_value(self).validate(data_start, data_end))
+                array::Array::from_value(self).validate(data_start, data_end)
             }
             ValueType::Pointer => {
-                if let Some(target) = Pointer::from_value(self).deref(wide, data_start) {
-                    likely(target._validate::<false>(wide, data_start, self.bytes.as_ptr()))
-                } else {
-                    false
-                }
+                let target = Pointer::from_value(self).deref(wide, data_start)?;
+                target._validate::<false>(wide, data_start, self.bytes.as_ptr())
             }
             _ => {
-                if IS_ARR_ELEM {
-                    // We don't need to validate the value fits within the data, as RawArray::validate already does that.
-                    // This optimization improves benchmark performance by ~15%.
-                    true
+                // We don't need to validate that array elements fit within the data, as
+                // Array::validate already does that. This improves benchmark performance by ~15%.
+                if IS_ARR_ELEM
+                    || likely(
+                        self.bytes.as_ptr() as usize + self.required_size() <= data_end as usize,
+                    )
+                {
+                    Ok(())
                 } else {
-                    likely(self.bytes.as_ptr() as usize + self.required_size() <= data_end as usize)
+                    Err(DecodeError::ValueOutOfBounds {
+                        value: self.clone_box(),
+                        required_size: self.required_size(),
+                        available_size: data_end as usize - self.bytes.as_ptr() as usize,
+                    })
                 }
             }
         }
@@ -345,7 +355,8 @@ impl Value {
     // The number of bytes required to hold this value
     // For Dict and Array, this does not include the size of inline values, only the header
     #[allow(clippy::match_same_arms)]
-    #[must_use] pub fn required_size(&self) -> usize {
+    #[must_use]
+    pub fn required_size(&self) -> usize {
         match self.value_type() {
             ValueType::Null
             | ValueType::Undefined
@@ -371,16 +382,20 @@ impl Value {
     }
 
     /// Converts a pointer to a `RawValue` reference, and validates its size
-    pub(super) fn _from_raw<'a>(ptr: *const u8, available_size: usize) -> Option<&'a Value> {
+    pub(super) fn _from_raw<'a>(ptr: *const u8, available_size: usize) -> Result<&'a Value> {
         let target: &Value = unsafe {
             let slice = std::slice::from_raw_parts(ptr, available_size);
             std::mem::transmute(slice)
         };
         if unlikely(target.len() < 2 || target.required_size() > available_size) {
-            return None;
+            Err(DecodeError::ValueOutOfBounds {
+                value: target.clone_box(),
+                required_size: target.required_size(),
+                available_size,
+            })
+        } else {
+            Ok(target)
         }
-
-        Some(target)
     }
 
     /// Converts a pointer to a `RawValue` reference.
@@ -435,6 +450,12 @@ impl Value {
             let end = 1 + size as usize;
             &self.bytes[1..end]
         }
+    }
+
+    fn clone_box(&self) -> Box<Value> {
+        let mut value_vec = Vec::with_capacity(self.len());
+        value_vec.extend_from_slice(&self.bytes);
+        unsafe { Box::from_raw(Box::into_raw(value_vec.into_boxed_slice()) as *mut Value) }
     }
 }
 
@@ -524,12 +545,13 @@ impl Ord for Value {
 
 // Mutability
 impl Value {
-    #[must_use] pub fn is_mutable(&self) -> bool {
+    #[must_use]
+    pub fn is_mutable(&self) -> bool {
         self.bytes.as_ptr() as usize & 1 != 0
     }
 }
 
-impl Display for Value {
+impl Debug for Value {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         if self.bytes.is_empty() {
             return write!(f, "Empty");
@@ -544,6 +566,62 @@ impl Display for Value {
             ValueType::Int => self.to_int().fmt(f),
             ValueType::Float | ValueType::Double32 | ValueType::Double64 => self.to_float().fmt(f),
             ValueType::String => self.to_str().fmt(f),
+            ValueType::Data => self.to_data().fmt(f),
+            ValueType::Array => {
+                let array = self.as_array().unwrap();
+                let mut string = "Array [".to_string();
+                for (i, val) in array.into_iter().enumerate() {
+                    string.push_str(&format!("{:?}", val));
+                    if i < array.len() - 1 {
+                        string.push_str(", ");
+                    }
+                }
+                string.push(']');
+                write!(f, "{}", string)
+            }
+            ValueType::Dict => {
+                let dict = self.as_dict().unwrap();
+                let mut string = "Dict {".to_string();
+                for (i, elem) in dict.into_iter().enumerate() {
+                    string.push_str(&format!("{:?} : {:?}", elem.key, elem.val));
+                    if i < dict.len() - 1 {
+                        string.push_str(", ");
+                    }
+                }
+                string.push('}');
+                write!(f, "{}", string)
+            }
+            ValueType::Pointer => {
+                let pointer = Pointer::from_value(self);
+                let narrow_offset = unsafe { pointer.get_offset(false) };
+                let wide_offset = if self.len() >= 4 {
+                    unsafe { pointer.get_offset(true) }
+                } else {
+                    0
+                };
+                write!(
+                    f,
+                    "Pointer {{ if narrow: -{narrow_offset}, if wide: -{wide_offset} }}"
+                )
+            }
+        }
+    }
+}
+
+impl Debug for ValueType {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ValueType::Null => write!(f, "Null"),
+            ValueType::Undefined => write!(f, "Undefined"),
+            ValueType::False => write!(f, "False"),
+            ValueType::True => write!(f, "True"),
+            ValueType::Short => write!(f, "Short"),
+            ValueType::Int => write!(f, "Int"),
+            ValueType::UnsignedInt => write!(f, "UnsignedInt"),
+            ValueType::Float => write!(f, "Float"),
+            ValueType::Double32 => write!(f, "Double32"),
+            ValueType::Double64 => write!(f, "Double64"),
+            ValueType::String => write!(f, "String"),
             ValueType::Data => write!(f, "Data"),
             ValueType::Array => write!(f, "Array"),
             ValueType::Dict => write!(f, "Dict"),

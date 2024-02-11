@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use crate::value::sized::SizedValue;
 use std::collections::BTreeMap;
 
@@ -15,18 +16,21 @@ pub struct Array {
     pub values: Vec<SizedValue>,
 }
 
+pub struct DictElement {
+    pub key: SizedValue,
+    pub val: SizedValue,
+}
+
 // Dict uses a BTreeMap because they are naturally sorted
 pub struct Dict {
-    pub values: BTreeMap<SizedValue, SizedValue>,
+    pub values: Vec<DictElement>,
     pub next_key: Option<SizedValue>,
 }
 
 impl CollectionStack {
     // CollectionStack always starts with a Dict
     pub fn new() -> Self {
-        Self {
-            collections: vec![Collection::Dict(Dict::new())],
-        }
+        Self::default()
     }
 
     pub fn len(&self) -> usize {
@@ -94,7 +98,7 @@ impl Array {
 impl Dict {
     pub fn new() -> Self {
         Self {
-            values: BTreeMap::new(),
+            values: Vec::new(),
             next_key: None,
         }
     }
@@ -103,16 +107,12 @@ impl Dict {
         if self.next_key.is_some() {
             return None;
         }
-        if self.values.contains_key(&key) {
-            debug_assert!(false, "Duplicate key");
-            return None;
-        }
         self.next_key = Some(key);
         Some(())
     }
 
     pub fn push_value(&mut self, value: SizedValue) -> Option<()> {
-        self.values.insert(self.next_key.take()?, value);
+        self.values.push(DictElement { key: self.next_key.take()?, val: value });
         Some(())
     }
 }

@@ -1,7 +1,8 @@
+use crate::encoder::value_stack;
 use crate::encoder::{Encodable, NullValue, UndefinedValue};
 use crate::value;
 use crate::value::sized::SizedValue;
-use crate::value::varint;
+use crate::value::{array, varint};
 use std::io::Write;
 
 /// All of the built-in implementations of [`Encodable`].
@@ -372,5 +373,71 @@ impl Encodable for SizedValue {
 
     fn to_value(&self) -> Option<SizedValue> {
         Some(self.clone())
+    }
+}
+
+// Just write the Array header, not the values
+impl Encodable for value_stack::Array {
+    fn write_fleece_to<W: Write>(&self, writer: &mut W, is_wide: bool) -> Option<usize> {
+        let size = self.values.len();
+        let mut buf = [0_u8; 2 + varint::MAX_LEN];
+        let written = 2 + if size >= array::VARINT_COUNT as usize {
+            varint::write(&mut buf[2..], size as u64)
+        } else {
+            0
+        };
+        #[allow(clippy::cast_possible_truncation)]
+            let inline_size = size.min(array::VARINT_COUNT as usize) as u16;
+
+        buf[0] = value::tag::ARRAY | (inline_size >> 8) as u8;
+        buf[1] = (inline_size & 0xFF) as u8;
+
+        if is_wide {
+            buf[0] |= 0x08;
+        }
+
+        writer.write_all(&buf[..written]).ok()?;
+        Some(written)
+    }
+
+    fn fleece_size(&self) -> usize {
+        2
+    }
+
+    fn to_value(&self) -> Option<SizedValue> {
+        None
+    }
+}
+
+impl Encodable for value_stack::Dict {
+    // Just write the Dict header, not the values
+    fn write_fleece_to<W: Write>(&self, writer: &mut W, is_wide: bool) -> Option<usize> {
+        let size = self.values.len();
+        let mut buf = [0_u8; 2 + varint::MAX_LEN];
+        let written = 2 + if size >= array::VARINT_COUNT as usize {
+            varint::write(&mut buf[2..], size as u64)
+        } else {
+            0
+        };
+        #[allow(clippy::cast_possible_truncation)]
+        let inline_size = size.min(array::VARINT_COUNT as usize) as u16;
+
+        buf[0] = value::tag::DICT | (inline_size >> 8) as u8;
+        buf[1] = (inline_size & 0xFF) as u8;
+
+        if is_wide {
+            buf[0] |= 0x08;
+        }
+
+        writer.write_all(&buf[..written]).ok()?;
+        Some(written)
+    }
+
+    fn fleece_size(&self) -> usize {
+        2
+    }
+
+    fn to_value(&self) -> Option<SizedValue> {
+        None
     }
 }

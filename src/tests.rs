@@ -5,33 +5,73 @@ use crate::value::ValueType;
 const PERSON_ENCODED: &[u8] = include_bytes!("../1person.fleece");
 const PEOPLE_ENCODED: &[u8] = include_bytes!("../1000people.fleece");
 
+fn decode_person_checks(person: &Value) {
+    assert_eq!(person.value_type(), ValueType::Dict, "Expected Person to be a Dict!");
+    let person_dict = person.as_dict().unwrap();
+    assert_eq!(person_dict.len(), 21, "Expected Person to have 21 keys!");
+    let age = person_dict
+        .get("age")
+        .expect("Expected Person to have key 'age'!");
+    assert_eq!(
+        age.value_type(),
+        ValueType::Short,
+        "Expected age to be a Short!"
+    );
+    assert_eq!(age.to_short(), 30, "Expected age to be 30!");
+}
+
 #[test]
 fn decode_person() {
     let person = Value::from_bytes(PERSON_ENCODED);
-    assert!(person.is_some());
-    let person = person.unwrap();
-    println!("{person}");
-    assert!(person.value_type() == ValueType::Dict);
-    let person_dict = person.as_dict().unwrap();
-    let age = person_dict.get("age");
-    assert!(age.is_some());
-    let age = age.unwrap();
-    assert!(age.value_type() == ValueType::Short);
-    assert_eq!(age.to_short(), 30);
+    let person = person.expect("Failed to decode Fleece");
+    decode_person_checks(person);
+}
+
+fn decode_people_checks(people: &Value) {
+    let people_array = people.as_array().expect("Expected People to be an Array!");
+    assert_eq!(people_array.len(), 1000, "Expected 1000 people!");
+    for (i, person) in people_array.into_iter().enumerate() {
+        let person = person.as_dict().expect("Expected Person to be a Dict!");
+        let id = person
+            .get("_id")
+            .expect("Expected Person to have key '_id'!");
+        assert_eq!(
+            id.value_type(),
+            ValueType::String,
+            "Expected _id to be a String!"
+        );
+        let index = person
+            .get("index")
+            .expect("Expected Person to have key 'index'!");
+        assert_eq!(
+            index.value_type(),
+            ValueType::Short,
+            "Expected index to be a Short!"
+        );
+        #[allow(clippy::cast_possible_truncation)]
+        let index = index.to_unsigned_int() as usize;
+        assert_eq!(
+            index, i,
+            "Expected index to be the same as the array index!"
+        );
+    }
+}
+
+#[test]
+fn decode_people() {
+    let people = Value::from_bytes(PEOPLE_ENCODED);
+    let people = people.expect("Failed to decode Fleece");
+
+    decode_people_checks(people);
 }
 
 #[test]
 fn encode_person() {
+    let original = Value::from_bytes(PERSON_ENCODED).expect("Failed to decode Fleece");
     let mut encoder = Encoder::new();
-    encoder.write_key("name").expect("Failed to write key!");
-    encoder
-        .write_value("Alice")
-        .expect("Failed to write value!");
+    encoder.write_fleece(original).expect("Failed to write value!");
     let res = encoder.finish();
+    let value = Value::from_bytes(&res).unwrap();
 
-    let value = Value::from_bytes(&res).expect("Failed to decode encoded value!");
-    assert!(value.value_type() == ValueType::Dict);
-    let dict = value.as_dict().unwrap();
-    let name = dict.get("name").expect("Failed to get name key!");
-    assert_eq!(name.to_str(), "Alice");
+    decode_person_checks(value);
 }

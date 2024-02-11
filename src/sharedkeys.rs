@@ -25,7 +25,7 @@ impl SharedKeys {
     }
 
     pub fn from_state_bytes(data: &[u8]) -> Option<Self> {
-        let state_value = Value::from_bytes(data)?;
+        let state_value = Value::from_bytes(data).ok()?;
         Self::from_state_value(state_value)
     }
 
