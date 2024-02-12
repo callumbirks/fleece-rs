@@ -344,7 +344,11 @@ impl<W: Write> Encoder<W> {
         let pointer = Pointer::from_value(pointer.as_value());
         let offset_from_start = unsafe { pointer.get_offset(is_wide) } as u32;
         let offset = len - offset_from_start;
-        SizedValue::new_pointer(offset).unwrap()
+        if is_wide {
+            SizedValue::new_pointer(offset).unwrap()
+        } else {
+            SizedValue::new_narrow_pointer(offset as u16)
+        }
     }
 
     fn _finished_collection(&mut self, offset_from_start: u32) {
@@ -363,7 +367,7 @@ impl<W: Write> Encoder<W> {
             // The last collection is finished, write the root value at the end.
             // This root value points to the outermost collection.
             let root =
-                SizedValue::new_pointer(self._actual_pointer_offset(offset_from_start)).unwrap();
+                SizedValue::new_narrow_pointer(self._actual_pointer_offset(offset_from_start) as u16);
             self._write(&root, false);
         }
     }

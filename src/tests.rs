@@ -6,6 +6,7 @@ const PERSON_ENCODED: &[u8] = include_bytes!("../1person.fleece");
 const PEOPLE_ENCODED: &[u8] = include_bytes!("../1000people.fleece");
 
 fn decode_person_checks(person: &Value) {
+    println!("{person:?}");
     assert_eq!(person.value_type(), ValueType::Dict, "Expected Person to be a Dict!");
     let person_dict = person.as_dict().unwrap();
     assert_eq!(person_dict.len(), 21, "Expected Person to have 21 keys!");
@@ -24,6 +25,7 @@ fn decode_person_checks(person: &Value) {
 fn decode_person() {
     let person = Value::from_bytes(PERSON_ENCODED);
     let person = person.expect("Failed to decode Fleece");
+    println!("DECODE {PERSON_ENCODED:x?}");
     decode_person_checks(person);
 }
 
@@ -73,5 +75,19 @@ fn encode_person() {
     let res = encoder.finish();
     let value = Value::from_bytes(&res).unwrap();
 
+    println!("ENCODE {:x?}", res.as_slice());
+
+    // TODO: assert_eq!(res.len(), PERSON_ENCODED.len(), "Expected encoded value to be the same length!");
+
     decode_person_checks(value);
+}
+
+#[test]
+fn encode_people() {
+    let original = Value::from_bytes(PEOPLE_ENCODED).expect("Failed to decode Fleece");
+    let mut encoder = Encoder::new();
+    encoder.write_fleece(original).expect("Failed to write value!");
+    let res = encoder.finish();
+    let value = Value::from_bytes(&res).unwrap();
+    decode_people_checks(value);
 }
