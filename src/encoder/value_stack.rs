@@ -1,6 +1,4 @@
-use std::cell::Cell;
 use crate::value::sized::SizedValue;
-use std::collections::BTreeMap;
 
 #[derive(Default)]
 pub struct CollectionStack {
@@ -16,25 +14,28 @@ pub struct Array {
     pub values: Vec<SizedValue>,
 }
 
+pub enum DictKey {
+    Inline(SizedValue),
+    // We keep an allocated copy of the key for sorting comparison, because the key is already written to the buffer
+    Pointer(Box<str>, u32),
+    Shared(u16),
+}
+
 pub struct DictElement {
-    pub key: SizedValue,
+    pub key: DictKey,
     pub val: SizedValue,
 }
 
 // Dict uses a BTreeMap because they are naturally sorted
 pub struct Dict {
     pub values: Vec<DictElement>,
-    pub next_key: Option<SizedValue>,
+    pub next_key: Option<DictKey>,
 }
 
 impl CollectionStack {
     // CollectionStack always starts with a Dict
     pub fn new() -> Self {
         Self::default()
-    }
-
-    pub fn len(&self) -> usize {
-        self.collections.len()
     }
 
     pub fn top(&self) -> Option<&Collection> {
@@ -80,10 +81,6 @@ impl CollectionStack {
 }
 
 impl Array {
-    pub fn new() -> Self {
-        Self { values: vec![] }
-    }
-
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
             values: Vec::with_capacity(capacity),
@@ -103,7 +100,7 @@ impl Dict {
         }
     }
 
-    pub fn push_key(&mut self, key: SizedValue) -> Option<()> {
+    pub fn push_key(&mut self, key: DictKey) -> Option<()> {
         if self.next_key.is_some() {
             return None;
         }

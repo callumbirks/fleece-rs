@@ -6,7 +6,6 @@ const PERSON_ENCODED: &[u8] = include_bytes!("../1person.fleece");
 const PEOPLE_ENCODED: &[u8] = include_bytes!("../1000people.fleece");
 
 fn decode_person_checks(person: &Value) {
-    println!("{person:?}");
     assert_eq!(person.value_type(), ValueType::Dict, "Expected Person to be a Dict!");
     let person_dict = person.as_dict().unwrap();
     assert_eq!(person_dict.len(), 21, "Expected Person to have 21 keys!");
@@ -25,7 +24,6 @@ fn decode_person_checks(person: &Value) {
 fn decode_person() {
     let person = Value::from_bytes(PERSON_ENCODED);
     let person = person.expect("Failed to decode Fleece");
-    println!("DECODE {PERSON_ENCODED:x?}");
     decode_person_checks(person);
 }
 
@@ -75,8 +73,6 @@ fn encode_person() {
     let res = encoder.finish();
     let value = Value::from_bytes(&res).unwrap();
 
-    println!("ENCODE {:x?}", res.as_slice());
-
     // TODO: assert_eq!(res.len(), PERSON_ENCODED.len(), "Expected encoded value to be the same length!");
 
     decode_person_checks(value);
@@ -91,3 +87,24 @@ fn encode_people() {
     let value = Value::from_bytes(&res).unwrap();
     decode_people_checks(value);
 }
+
+//#[test]
+//fn shared_keys() {
+//    let mut encoder = Encoder::new();
+//    encoder.set_shared_keys(SharedKeys::new());
+//    encoder.begin_dict();
+//    encoder.write_key("name").expect("Failed to write key!");
+//    encoder.write_value("John").expect("Failed to write value!");
+//    let shared_keys = encoder.shared_keys().unwrap();
+//    let res = encoder.finish();
+//    assert_eq!(shared_keys.len(), 1, "Expected 1 shared key!");
+//    let value = Value::from_bytes(&res).expect("Failed to decode Fleece");
+//    let dict = value.as_dict().expect("Expected value to be a Dict!");
+//    let name = dict.get("name").expect("Expected Dict to have key 'name'!");
+//    assert_eq!(
+//        name.value_type(),
+//        ValueType::String,
+//        "Expected name to be a String!"
+//    );
+//    assert_eq!(name.to_str(), "John", "Expected name to be 'John'!");
+//}

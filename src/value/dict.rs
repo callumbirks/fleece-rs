@@ -49,9 +49,10 @@ impl Dict {
         let key = key.borrow();
         // Convert the key to a Value for easy comparison
         let mut key_vec = Vec::with_capacity(key.len() + 1);
-        key.write_fleece_to(&mut key_vec, false);
+        key.write_fleece_to(&mut key_vec, false).ok()?;
         let key: &Value = unsafe { std::mem::transmute(key_vec.as_slice()) };
 
+        // We use binary search to find the key. This is possible because the dict keys are sorted.
         // This binary search implementation is borrowed from https://doc.rust-lang.org/std/vec/struct.Vec.html#method.binary_search_by
 
         let mut size = self.len();
@@ -64,7 +65,8 @@ impl Dict {
             // `size/2 < size`. Thus `left + size/2 < left + size`, which
             // coupled with the `left + size <= self.len()` invariant means
             // we have `left + size/2 < self.len()`, and this is in-bounds.
-            let cmp = key.cmp(unsafe { self.get_unchecked(mid).key });
+            let elem = unsafe { self.get_unchecked(mid) };
+            let cmp = Value::dict_key_cmp(key, elem.key, self.is_wide());
 
             // This control flow produces conditional moves, which results in
             // fewer branches and instructions than if/else or matching on
@@ -78,7 +80,7 @@ impl Dict {
             right = if cmp == Ordering::Less { mid } else { right };
             if cmp == Ordering::Equal {
                 // SAFETY: same as the `get_unchecked` above
-                return Some(unsafe { self.get_unchecked(mid).val });
+                return Some(elem.val);
             }
 
             size = right - left;
@@ -98,11 +100,7 @@ impl Dict {
         if self.len() == 0 {
             return None;
         }
-        Some(unsafe { self.first_unchecked() })
-    }
-
-    unsafe fn first_unchecked(&self) -> Element {
-        self.get_unchecked(0)
+        Some(unsafe { self.get_unchecked(0) })
     }
 
     pub fn is_wide(&self) -> bool {

@@ -1,13 +1,17 @@
-use crate::encoder::value_stack::{Collection, CollectionStack};
+use crate::encoder::error::EncodeError;
+use crate::encoder::value_stack::{Collection, CollectionStack, DictKey};
 use crate::sharedkeys::SharedKeys;
-use crate::value;
-use crate::value::pointer::Pointer;
+use crate::value::pointer::Pointer as ValuePointer;
 use crate::value::sized::SizedValue;
 use crate::value::{pointer, ValueType};
+use crate::value;
+use error::Result;
 use std::borrow::Borrow;
+use std::cmp::Ordering;
 use std::io::Write;
 
 mod encodable;
+mod error;
 mod value_stack;
 
 struct NullValue;
@@ -17,7 +21,7 @@ struct UndefinedValue;
 pub trait Encodable {
     /// Write self to the given writer, encoded as Fleece. Return [`None`] if any write operations fail.
     /// Return [`Some`] with the number of bytes written if the value was written successfully.
-    fn write_fleece_to<W: Write>(&self, writer: &mut W, is_wide: bool) -> Option<usize>;
+    fn write_fleece_to<W: Write>(&self, writer: &mut W, is_wide: bool) -> std::io::Result<usize>;
     /// The number of bytes necessary to encode this value in Fleece.
     fn fleece_size(&self) -> usize;
     /// Construct a [`SizedValue`] from this value, if this value can be represented in 2 bytes of Fleece. Otherwise,
@@ -51,41 +55,46 @@ impl<W: Write> Encoder<W> {
         }
     }
 
-    pub fn write_key(&mut self, key: &str) -> Option<()> {
+    pub fn write_key(&mut self, key: &str) -> Result<()> {
         if let Some(val) = key.to_value() {
-            let Collection::Dict(dict) = self.collection_stack.top_mut()? else {
-                return None;
+            let Some(Collection::Dict(dict)) = self.collection_stack.top_mut() else {
+                return Err(EncodeError::DictNotOpen);
             };
             // If the key is small enough to fit in a fixed-width value, inline it
-            dict.push_key(val)
+            dict.push_key(DictKey::Inline(val))
+                .ok_or_else(|| EncodeError::DictWaitingForValue)
         } else if let Some(shared_keys) = &mut self.shared_keys {
-            let Collection::Dict(dict) = self.collection_stack.top_mut()? else {
-                return None;
+            let Some(Collection::Dict(dict)) = self.collection_stack.top_mut() else {
+                return Err(EncodeError::DictNotOpen);
             };
             // If we have shared keys, insert the key into the shared keys and add the corresponding int key to the Dict
-            let int_key = shared_keys.encode_and_insert(key)?;
+            let int_key = shared_keys
+                .encode_and_insert(key)
+                .ok_or_else(|| EncodeError::SharedKeysInvalidKey)?;
             // Unwrap is safe here because `u16::to_value` will only fail if the value is > 2047, which it will never
             // be because the shared_keys holds max 2048 keys (and the first one is 0)
-            dict.push_key(int_key.to_value().unwrap())
+            dict.push_key(DictKey::Shared(int_key))
+                .ok_or_else(|| EncodeError::DictWaitingForValue)
         } else {
             // If we don't have shared keys, write the key to the output buffer and add a pointer to it in the Dict
             let offset = self._write(key, false)?;
-            let Collection::Dict(dict) = self.collection_stack.top_mut()? else {
-                return None;
+            let Some(Collection::Dict(dict)) = self.collection_stack.top_mut() else {
+                return Err(EncodeError::DictNotOpen);
             };
-            dict.push_key(SizedValue::new_pointer(offset)?)
+            dict.push_key(DictKey::Pointer(key.into(), offset))
+                .ok_or_else(|| EncodeError::DictWaitingForValue)
         }
     }
 
     /// Write an [`Encodable`] type to the encoder. The parameter may be any borrowed form of an Encodable type.
     // `R: Borrow<T>` enables us to pass something like an Rc<T> directly to this function
-    pub fn write_value<R, T>(&mut self, value: &R) -> Option<()>
+    pub fn write_value<R, T>(&mut self, value: &R) -> Result<()>
     where
         R: Borrow<T> + ?Sized,
         T: Encodable + ?Sized,
     {
         if self.collection_stack.empty() {
-            return None;
+            return Err(EncodeError::CollectionNotOpen);
         }
 
         let value = value.borrow();
@@ -95,18 +104,19 @@ impl<W: Write> Encoder<W> {
         } else {
             // Otherwise, write it to output and push a pointer to it onto the current collection
             let offset = self._write(value, false)?;
-            let pointer = SizedValue::new_pointer(offset)?;
+            let pointer =
+                SizedValue::new_pointer(offset).ok_or_else(|| EncodeError::PointerTooLarge)?;
             self._push(pointer)
         }
     }
 
-    pub fn write_fleece(&mut self, value: &value::Value) -> Option<()> {
+    pub fn write_fleece(&mut self, value: &value::Value) -> Result<()> {
         // If the encoder has no open collections and the value is not a collection, return None
         if self.collection_stack.empty()
             && value.value_type() != ValueType::Dict
             && value.value_type() != ValueType::Array
         {
-            return None;
+            return Err(EncodeError::CollectionNotOpen);
         }
         match value.value_type() {
             ValueType::True => self._push(SizedValue::from_narrow(value::constants::TRUE)),
@@ -137,20 +147,20 @@ impl<W: Write> Encoder<W> {
                     // TODO: SHARED KEYS (Short)
                     let key = if elem.key.value_type() == ValueType::Pointer {
                         unsafe {
-                            Pointer::from_value(elem.key)
+                            ValuePointer::from_value(elem.key)
                                 .deref_unchecked(false)
                                 .to_str()
                         }
                     } else {
                         elem.key.to_str()
                     };
-                    self.write_key(key);
+                    self.write_key(key)?;
                     self.write_fleece(elem.val)?;
                 }
                 self.end_dict()
             }
             ValueType::Pointer => unsafe {
-                self.write_fleece(Pointer::from_value(value).deref_unchecked(false))
+                self.write_fleece(ValuePointer::from_value(value).deref_unchecked(false))
             },
         }
     }
@@ -159,9 +169,9 @@ impl<W: Write> Encoder<W> {
         self.collection_stack.push_array(capacity);
     }
 
-    pub fn end_array(&mut self) -> Option<()> {
-        let Collection::Array(mut array) = self.collection_stack.pop()? else {
-            return None;
+    pub fn end_array(&mut self) -> Result<()> {
+        let Some(Collection::Array(mut array)) = self.collection_stack.pop() else {
+            return Err(EncodeError::ArrayNotOpen);
         };
         let is_wide = Encoder::<W>::_array_should_be_wide(&array);
 
@@ -171,28 +181,53 @@ impl<W: Write> Encoder<W> {
         self._fix_array_pointers(&mut array, is_wide);
 
         for v in &array.values {
-            self._write(v, is_wide);
+            self._write(v, is_wide)?;
         }
 
         self._finished_collection(offset);
 
-        Some(())
+        Ok(())
     }
 
     pub fn begin_dict(&mut self) {
         self.collection_stack.push_dict();
     }
 
-    pub fn end_dict(&mut self) -> Option<()> {
+    /// This *MUST* follow the implementation at [`value::Value::dict_key_cmp`]
+    pub(crate) fn dict_key_cmp(value1: &DictKey, value2: &DictKey) -> Ordering {
+        match (value1, value2) {
+            // Inline strings
+            (DictKey::Inline(value1), DictKey::Inline(value2)) => {
+                value1.as_value().to_str().cmp(value2.as_value().to_str())
+            }
+            // Pointers to strings
+            (DictKey::Pointer(val1, _), DictKey::Pointer(val2, _)) => {
+                val1.as_ref().cmp(val2.as_ref())
+            }
+            (DictKey::Inline(value1), DictKey::Pointer(val2, _)) => {
+                value1.as_value().to_str().cmp(val2.as_ref())
+            }
+            (DictKey::Pointer(val1, _), DictKey::Inline(value2)) => {
+                val1.as_ref().cmp(value2.as_value().to_str())
+            }
+            // SharedKeys
+            (DictKey::Shared(value1), DictKey::Shared(value2)) => value1.cmp(value2),
+            // SharedKeys are sorted first in the dict
+            (DictKey::Shared(_), _) => Ordering::Less,
+            (_, DictKey::Shared(_)) => Ordering::Greater,
+        }
+    }
+
+    pub fn end_dict(&mut self) -> Result<()> {
         match self.collection_stack.top() {
             // Can only end a dict if the top collection is a dict
             Some(Collection::Dict(dict)) => {
                 // That dict must not have a key waiting for a value
                 if dict.next_key.is_some() {
-                    return None;
+                    return Err(EncodeError::DictWaitingForValue);
                 }
             }
-            _ => return None,
+            _ => return Err(EncodeError::DictNotOpen),
         }
         let Some(Collection::Dict(mut dict)) = self.collection_stack.pop() else {
             unreachable!()
@@ -203,19 +238,37 @@ impl<W: Write> Encoder<W> {
         // Write the Dict header via `Encodable` trait
         let offset = self._write(&dict, is_wide)?;
 
-        dict.values.sort_unstable_by_key(| kv | kv.key.clone());
+        dict.values
+            .sort_unstable_by(|elem1, elem2| Encoder::<W>::dict_key_cmp(&elem1.key, &elem2.key));
 
         self._fix_dict_pointers(&mut dict, is_wide);
 
         for elem in &dict.values {
-            self._write(&elem.key, is_wide);
-            self._write(&elem.val, is_wide);
+            match &elem.key {
+                DictKey::Inline(val) => self._write(val, is_wide)?,
+                DictKey::Shared(int_key) => {
+                    // Unwrap is safe because u16::to_value only fails if > 2047, that's never the case for shared keys
+                    let val = int_key.to_value().unwrap();
+                    self._write(&val, is_wide)?
+                }
+                DictKey::Pointer(_, offset) => {
+                    if is_wide {
+                        let val = SizedValue::new_pointer(*offset).unwrap();
+                        self._write(&val, is_wide)?
+                    } else {
+                        #[allow(clippy::cast_possible_truncation)]
+                        let val = SizedValue::new_narrow_pointer(*offset as u16);
+                        self._write(&val, is_wide)?
+                    }
+                }
+            };
+            self._write(&elem.val, is_wide)?;
         }
 
         #[allow(clippy::cast_possible_truncation)]
         self._finished_collection(offset);
 
-        Some(())
+        Ok(())
     }
 
     pub fn finish(mut self) -> W {
@@ -241,28 +294,39 @@ impl<W: Write> Encoder<W> {
     // are evenly aligned.
     /// Write a value to the output buffer and return the offset at which it was written.
     /// The offset can be used to create a pointer to the value.
-    fn _write<T: Encodable + ?Sized>(&mut self, value: &T, is_wide: bool) -> Option<u32> {
+    fn _write<T: Encodable + ?Sized>(&mut self, value: &T, is_wide: bool) -> Result<u32> {
         #[allow(clippy::cast_possible_truncation)]
         let offset = self.len as u32;
-        self.len += value.write_fleece_to(&mut self.out, is_wide)?;
+        self.len += value
+            .write_fleece_to(&mut self.out, is_wide)
+            .map_err(|e| EncodeError::Io { source: e })?;
         // Pad to even
         if self.len % 2 != 0 {
-            self.out.write_all(&[0]).ok()?;
+            self.out
+                .write_all(&[0])
+                .map_err(|e| EncodeError::Io { source: e })?;
             self.len += 1;
         }
-        Some(offset)
+
+        Ok(offset)
     }
 
     /// Push a fixed-width Fleece value to the collection which is currently at the top of the stack.
     /// This function will return [`None`] if the top of the stack is not a collection, or if it is a
     /// [`Collection::Dict`] and the last addition was not a key.
-    fn _push(&mut self, value: SizedValue) -> Option<()> {
-        match self.collection_stack.top_mut()? {
+    fn _push(&mut self, value: SizedValue) -> Result<()> {
+        match self
+            .collection_stack
+            .top_mut()
+            .ok_or_else(|| EncodeError::CollectionNotOpen)?
+        {
             Collection::Array(arr) => {
                 arr.push(value);
-                Some(())
+                Ok(())
             }
-            Collection::Dict(dict) => dict.push_value(value),
+            Collection::Dict(dict) => dict
+                .push_value(value)
+                .ok_or_else(|| EncodeError::DictWaitingForKey),
         }
     }
 
@@ -270,10 +334,10 @@ impl<W: Write> Encoder<W> {
     fn _end(&mut self) {
         while let Some(collection) = self.collection_stack.top_mut() {
             match collection {
-                Collection::Array(_) => self.end_array(),
+                Collection::Array(_) => self.end_array().ok(),
                 Collection::Dict(dict) => {
                     dict.next_key.take();
-                    self.end_dict()
+                    self.end_dict().ok()
                 }
             };
         }
@@ -297,14 +361,13 @@ impl<W: Write> Encoder<W> {
     fn _dict_should_be_wide(&self, dict: &value_stack::Dict) -> bool {
         let mut len = self.len;
         for elem in &dict.values {
-            if elem.key.value_type() == ValueType::Pointer {
-                let pointer = Pointer::from_value(elem.key.as_value());
-                let offset = len - unsafe { pointer.get_offset(elem.key.is_wide()) };
-                if offset > pointer::MAX_NARROW as usize {
+            if let DictKey::Pointer(_, offset) = &elem.key {
+                let offset = len - *offset as usize;
+                if len - offset > pointer::MAX_NARROW as usize {
                     return true;
                 }
             }
-            if elem.val.is_wide() {
+            if elem.val.value_type() == ValueType::Pointer && elem.val.is_wide() {
                 return true;
             }
             len += 2;
@@ -313,6 +376,7 @@ impl<W: Write> Encoder<W> {
     }
 
     fn _fix_array_pointers(&self, array: &mut value_stack::Array, is_wide: bool) {
+        #[allow(clippy::cast_possible_truncation)]
         let mut len = self.len as u32;
         for elem in &mut array.values {
             if elem.value_type() == ValueType::Pointer {
@@ -324,16 +388,15 @@ impl<W: Write> Encoder<W> {
     }
 
     fn _fix_dict_pointers(&self, dict: &mut value_stack::Dict, is_wide: bool) {
+        #[allow(clippy::cast_possible_truncation)]
         let mut len = self.len as u32;
         for elem in &mut dict.values {
-            if elem.key.value_type() == ValueType::Pointer {
-                let pointer = Encoder::<W>::_fix_pointer(&elem.key, len, is_wide);
-                elem.key = pointer;
+            if let DictKey::Pointer(_, offset) = &mut elem.key {
+                *offset = len - *offset;
             }
             len += if is_wide { 4 } else { 2 };
             if elem.val.value_type() == ValueType::Pointer {
-                let pointer = Encoder::<W>::_fix_pointer(&elem.val, len, is_wide);
-                elem.val = pointer;
+                elem.val = Encoder::<W>::_fix_pointer(&elem.val, len, is_wide);
             }
             len += if is_wide { 4 } else { 2 };
         }
@@ -341,7 +404,15 @@ impl<W: Write> Encoder<W> {
 
     #[allow(clippy::cast_possible_truncation)]
     fn _fix_pointer(pointer: &SizedValue, len: u32, is_wide: bool) -> SizedValue {
-        let pointer = Pointer::from_value(pointer.as_value());
+        // Make sure pointers don't get truncated
+        let pointer = if is_wide {
+            pointer.clone()
+        } else {
+            pointer.narrow_pointer()
+        };
+
+        let pointer = ValuePointer::from_value(pointer.as_value());
+
         let offset_from_start = unsafe { pointer.get_offset(is_wide) } as u32;
         let offset = len - offset_from_start;
         if is_wide {
@@ -366,9 +437,12 @@ impl<W: Write> Encoder<W> {
         } else {
             // The last collection is finished, write the root value at the end.
             // This root value points to the outermost collection.
-            let root =
-                SizedValue::new_narrow_pointer(self._actual_pointer_offset(offset_from_start) as u16);
-            self._write(&root, false);
+            #[allow(clippy::cast_possible_truncation)]
+            let root = SizedValue::new_narrow_pointer(
+                self._actual_pointer_offset(offset_from_start) as u16,
+            );
+            self._write(&root, false)
+                .expect("IO Error while attempting to write root value");
         }
     }
 }

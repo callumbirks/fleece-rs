@@ -23,20 +23,11 @@ impl Array {
     }
 
     pub fn get(&self, index: usize) -> Option<&Value> {
-        let width = self.width();
-        let offset = index * width as usize;
-
         if index > self.len() {
             return None;
         }
 
-        #[allow(clippy::cast_possible_wrap)]
-        let target = unsafe { self.value._offset_unchecked(2 + offset as isize, width) };
-        Some(if target.value_type() == ValueType::Pointer {
-            unsafe { Pointer::from_value(target).deref_unchecked(self.is_wide()) }
-        } else {
-            target
-        })
+        Some(unsafe { self.get_unchecked(index) })
     }
 
     /// Get and dereference the value at the given index without bounds checking.
@@ -44,7 +35,9 @@ impl Array {
         let width = self.width();
         let offset = index * width as usize;
         #[allow(clippy::cast_possible_wrap)]
-        let target = self.value._offset_unchecked(2 + offset as isize, width);
+        let first_pos = self.first_pos();
+        #[allow(clippy::cast_possible_wrap)]
+        let target = self.value._offset_unchecked((first_pos + offset) as isize, width);
         if target.value_type() == ValueType::Pointer {
             Pointer::from_value(target).deref_unchecked(self.is_wide())
         } else {
@@ -52,21 +45,17 @@ impl Array {
         }
     }
 
-    pub fn first(&self) -> Option<&Value> {
-        if self.len() == 0 {
-            return None;
+    pub(super) fn first_pos(&self) -> usize {
+        if self.value.is_empty() {
+            return 0;
         }
         let size = self.value._get_short() & VARINT_COUNT;
 
         if unlikely(size == VARINT_COUNT) {
             let (read, _) = varint::read(&self.value.bytes[2..]);
-            if read == 0 {
-                None
-            } else {
-                Some(unsafe { self.value._offset_unchecked(2 + read as isize, self.width()) })
-            }
+            2 + read
         } else {
-            Some(unsafe { self.value._offset_unchecked(2, self.width()) })
+            2
         }
     }
 
@@ -84,22 +73,33 @@ impl Array {
 
     /// The number of values in this array.
     pub fn len(&self) -> usize {
-        let mut buf = [0_u8; 2];
-        buf.copy_from_slice(&self.value.bytes[0..2]);
-        let res = (u16::from_be_bytes(buf) & 0x07FF) as usize;
-        if res >= VARINT_COUNT as usize {
+        let size = self.value._get_short() & VARINT_COUNT;
+        if unlikely(size == VARINT_COUNT) {
             let (read, size) = varint::read(&self.value.bytes[2..]);
+            #[allow(clippy::cast_possible_truncation)]
             if read == 0 {
                 0
             } else {
                 size as usize
             }
         } else if self.value.value_type() == ValueType::Dict {
-            res * 2
+            size as usize * 2
         } else {
-            res
+            size as usize
         }
     }
+
+    /// The first value in the array. Does *NOT* dereference pointers, because the iterator will
+    /// need to offset from this value.
+    fn _iter_first(&self) -> Option<&Value> {
+        if self.len() == 0 {
+            return None;
+        }
+
+        #[allow(clippy::cast_possible_wrap)]
+        Some(unsafe { self.value._offset_unchecked(self.first_pos() as isize, self.width()) })
+    }
+
 }
 
 // Validation
@@ -123,7 +123,7 @@ impl Array {
 
         let mut current = first;
 
-        for i in 0..elem_count {
+        for _ in 0..elem_count {
             let next = unsafe { current.add(width) };
             Value::_from_raw(current, width)?._validate::<true>(is_wide, data_start, next)?;
             current = next;
@@ -181,7 +181,7 @@ impl<'a> IntoIterator for &'a Array {
 
     fn into_iter(self) -> Self::IntoIter {
         Iter {
-            next: self.first(),
+            next: self._iter_first(),
             width: self.width(),
             index: 0,
             len: self.len(),

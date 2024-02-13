@@ -1,7 +1,4 @@
 use super::{pointer, tag, Value, ValueType};
-use crate::likely;
-use crate::value::pointer::Pointer;
-use std::cmp::Ordering;
 
 /// A statically sized [`Value`]. This is always 4 bytes.
 #[derive(Clone)]
@@ -53,48 +50,18 @@ impl SizedValue {
         unsafe { std::mem::transmute(&self.bytes as &[u8]) }
     }
 
+    pub(crate) fn narrow_pointer(&self) -> Self {
+        Self {
+            bytes: [tag::POINTER | self.bytes[2], self.bytes[3], 0, 0],
+        }
+    }
+
     pub fn as_bytes(&self) -> &[u8; 4] {
         &self.bytes
     }
 
-    // Only used for pointer, as Pointer is the only value stored inline which can be wide
+    /// Only check this on pointers, the result is garbage for other types
     pub fn is_wide(&self) -> bool {
         self.bytes[0] & 0x3f != 0 || self.bytes[1] != 0 || self.bytes[2] & 0xC0 != 0
-    }
-}
-impl PartialEq<Self> for SizedValue {
-    fn eq(&self, other: &Self) -> bool {
-        match (self.value_type(), other.value_type()) {
-            (ValueType::Pointer, ValueType::Pointer) => unsafe {
-                let val = Pointer::from_value(self.as_value()).deref_unchecked(self.is_wide());
-                let other = Pointer::from_value(other.as_value()).deref_unchecked(other.is_wide());
-                val.eq(other)
-            },
-            (ValueType::Pointer, _) => unsafe {
-                let val = Pointer::from_value(self.as_value()).deref_unchecked(self.is_wide());
-                val.eq(other.as_value())
-            },
-            (_, ValueType::Pointer) => unsafe {
-                let other = Pointer::from_value(other.as_value()).deref_unchecked(other.is_wide());
-                self.as_value().eq(other)
-            },
-            // Inline values are compared by their bytes
-            _ => self.bytes[0] == other.bytes[0] && self.bytes[1] == other.bytes[1],
-        }
-    }
-}
-
-impl Eq for SizedValue {}
-
-impl PartialOrd for SizedValue {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.as_value().cmp(other.as_value()))
-    }
-}
-
-/// Just use `Value` implementation.
-impl Ord for SizedValue {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.as_value().cmp(other.as_value())
     }
 }

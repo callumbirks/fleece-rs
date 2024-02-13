@@ -53,10 +53,9 @@ impl SharedKeys {
         let _read_guard = self.lock.read().unwrap();
         encoder.begin_array(self.len as usize);
         for key in self.map.keys() {
-            encoder.write_value::<_, str>(key)?;
+            encoder.write_value::<_, str>(key).ok()?;
         }
-        encoder.end_array();
-        Some(())
+        encoder.end_array().ok()
     }
 
     pub fn len(&self) -> usize {
@@ -85,10 +84,7 @@ impl SharedKeys {
 
     pub fn decode(&self, int_key: u16) -> Option<&str> {
         let _read_guard = self.lock.read().unwrap();
-        if let Some(key) = self.reverse_map.get(&int_key) {
-            return Some(key);
-        }
-        None
+        self.reverse_map.get(&int_key).map(|s| &**s)
     }
 
     pub fn can_add(&self, key: &str) -> bool {
@@ -115,8 +111,8 @@ impl SharedKeys {
             return None;
         }
         let value = self.len;
-        self.map.insert(key.clone(), value)?;
-        self.reverse_map.insert(value, key.clone())?;
+        self.map.insert(key.clone(), value);
+        self.reverse_map.insert(value, key.clone());
         self.len += 1;
         Some(value)
     }

@@ -381,6 +381,43 @@ impl Value {
         }
     }
 
+    pub(crate) fn dict_key_cmp(value1: &Self, value2: &Self, is_wide: bool) -> Ordering {
+        debug_assert!(matches!(value1.value_type(), ValueType::String | ValueType::Pointer | ValueType::Short));
+        debug_assert!(matches!(value2.value_type(), ValueType::String | ValueType::Pointer | ValueType::Short));
+        match (value1.value_type(), value2.value_type()) {
+            // Inline strings
+            (ValueType::String, ValueType::String) => value1.to_str().cmp(value2.to_str()),
+            // Pointers to strings
+            (ValueType::Pointer, ValueType::Pointer) => {
+                let val1 =
+                    unsafe { Pointer::from_value(value1).deref_unchecked(is_wide).to_str() };
+                debug_assert_ne!(val1, "", "value1 is not a pointer to a string!");
+                let val2 =
+                    unsafe { Pointer::from_value(value2).deref_unchecked(is_wide).to_str() };
+                debug_assert_ne!(val2, "", "value2 is not a pointer to a string!");
+                val1.cmp(val2)
+            }
+            (ValueType::String, ValueType::Pointer) => {
+                let val2 =
+                    unsafe { Pointer::from_value(value2).deref_unchecked(is_wide).to_str() };
+                debug_assert_ne!(val2, "", "value2 is not a pointer to a string!");
+                value1.to_str().cmp(val2)
+            }
+            (ValueType::Pointer, ValueType::String) => {
+                let val1 =
+                    unsafe { Pointer::from_value(value1).deref_unchecked(is_wide).to_str() };
+                debug_assert_ne!(val1, "", "value1 is not a pointer to a string!");
+                val1.cmp(value2.to_str())
+            }
+            // SharedKeys
+            (ValueType::Short, ValueType::Short) => value1.to_short().cmp(&value2.to_short()),
+            // SharedKeys are sorted first in the dict
+            (ValueType::Short, _) => Ordering::Less,
+            (_, ValueType::Short) => Ordering::Greater,
+            _ => unreachable!()
+        }
+    }
+
     /// Converts a pointer to a `RawValue` reference, and validates its size
     pub(super) fn _from_raw<'a>(ptr: *const u8, available_size: usize) -> Result<&'a Value> {
         let target: &Value = unsafe {
@@ -436,8 +473,8 @@ impl Value {
         if unlikely(self.bytes.is_empty()) {
             return &[];
         }
-        let size = self.bytes[0] & 0x0F;
-        if size == 0x0F {
+        let inline_size = self.bytes[0] & 0x0F;
+        if inline_size == 0x0F {
             // varint
             let (bytes_read, size) = varint::read(&self.bytes);
             if bytes_read == 0 {
@@ -447,7 +484,7 @@ impl Value {
             let end = 1 + bytes_read + size as usize;
             &self.bytes[1 + bytes_read..end]
         } else {
-            let end = 1 + size as usize;
+            let end = 1 + inline_size as usize;
             &self.bytes[1..end]
         }
     }
@@ -456,90 +493,6 @@ impl Value {
         let mut value_vec = Vec::with_capacity(self.len());
         value_vec.extend_from_slice(&self.bytes);
         unsafe { Box::from_raw(Box::into_raw(value_vec.into_boxed_slice()) as *mut Value) }
-    }
-}
-
-impl PartialEq<Self> for Value {
-    fn eq(&self, other: &Self) -> bool {
-        match (self.value_type(), other.value_type()) {
-            (ValueType::Short, ValueType::Short) => self.to_short() == other.to_short(),
-            (ValueType::Int, ValueType::Int) => self.to_int() == other.to_int(),
-            (ValueType::UnsignedInt, ValueType::UnsignedInt) => {
-                self.to_unsigned_int() == other.to_unsigned_int()
-            }
-            (ValueType::Float, ValueType::Float) => self.to_float() == other.to_float(),
-            (ValueType::Double32, ValueType::Double32)
-            | (ValueType::Double64, ValueType::Double64) => self.to_double() == other.to_double(),
-            (ValueType::String, ValueType::String) | (ValueType::Data, ValueType::Data) => {
-                self.to_data() == other.to_data()
-            }
-            // If both are pointers, compare the offsets
-            (ValueType::Pointer, ValueType::Pointer) => unsafe {
-                Pointer::from_value(self).get_offset(self.len() == 4)
-                    == Pointer::from_value(other).get_offset(other.len() == 4)
-            },
-            (ValueType::Pointer, _) => unsafe {
-                let val = Pointer::from_value(self).deref_unchecked(self.len() == 4);
-                val == other
-            },
-            (_, ValueType::Pointer) => unsafe {
-                let other = Pointer::from_value(other).deref_unchecked(other.len() == 4);
-                self == other
-            },
-            // Array and Dict are compared just by their tag and size
-            // Specials are only two bytes, so compared by tag and special tag
-            _ => self.bytes[..2] == other.bytes[..2],
-        }
-    }
-}
-
-impl Eq for Value {}
-
-impl PartialOrd for Value {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for Value {
-    fn cmp(&self, other: &Self) -> Ordering {
-        match (self.value_type(), other.value_type()) {
-            (ValueType::Short, ValueType::Short) => self.to_short().cmp(&other.to_short()),
-            (ValueType::Int, ValueType::Int) => self.to_int().cmp(&other.to_int()),
-            (ValueType::UnsignedInt, ValueType::UnsignedInt) => {
-                self.to_unsigned_int().cmp(&other.to_unsigned_int())
-            }
-            (ValueType::Float, ValueType::Float) => self.to_float().total_cmp(&other.to_float()),
-            (ValueType::Double32, ValueType::Double32)
-            | (ValueType::Double64, ValueType::Double64) => {
-                self.to_double().total_cmp(&other.to_double())
-            }
-            (ValueType::String, ValueType::String) | (ValueType::Data, ValueType::Data) => {
-                self.to_data().cmp(other.to_data())
-            }
-            // Special cases for sorting Dict keys
-            // Shorts (SharedKeys key) are sorted before strings
-            (ValueType::Short, ValueType::String) => Ordering::Less,
-            (ValueType::String, ValueType::Short) => Ordering::Greater,
-            // If both values are pointers we can just compare their offsets
-            (ValueType::Pointer, ValueType::Pointer) => unsafe {
-                let self_offset = Pointer::from_value(self).get_offset(self.len() == 4);
-                let other_offset = Pointer::from_value(other).get_offset(other.len() == 4);
-                self_offset.cmp(&other_offset)
-            },
-            // Pointers are de-referenced before comparison
-            (ValueType::Pointer, _) => unsafe {
-                let val = Pointer::from_value(self).deref_unchecked(self.len() == 4);
-                val.cmp(other)
-            },
-            (_, ValueType::Pointer) => unsafe {
-                let other = Pointer::from_value(other).deref_unchecked(other.len() == 4);
-                self.cmp(other)
-            },
-            // Array and Dict are compared just by their tag and size
-            // Specials are only two bytes, so compared by tag and special tag
-            _ => self.bytes[..2].cmp(&other.bytes[..2]),
-        }
     }
 }
 
