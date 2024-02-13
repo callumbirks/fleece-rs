@@ -20,6 +20,10 @@ opt-level = 2
 name = "decode"
 harness = false
 
+[[bench]]
+name = "encode"
+harness = false
+
 [lints.clippy]
 pedantic = { priority = -1, level = "warn" }
 module_name_repetitions = "allow"

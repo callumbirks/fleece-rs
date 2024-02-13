@@ -46,7 +46,7 @@ impl Array {
     }
 
     pub(super) fn first_pos(&self) -> usize {
-        if self.value.is_empty() {
+        if self.value.len() < 2 {
             return 0;
         }
         let size = self.value._get_short() & VARINT_COUNT;
@@ -112,7 +112,7 @@ impl Array {
         let width: usize = if is_wide { 4 } else { 2 };
         let elem_count = self.len();
 
-        let first = unsafe { self.value.bytes.as_ptr().add(2) };
+        let first = unsafe { self.value.bytes.as_ptr().add(self.first_pos()) };
         if unlikely((first as usize) + (elem_count * width) > (data_end as usize)) {
             return Err(DecodeError::ArrayOutOfBounds {
                 count: elem_count,

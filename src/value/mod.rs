@@ -8,7 +8,6 @@ pub(crate) mod sized;
 pub(crate) mod varint;
 
 use crate::value::error::DecodeError;
-use crate::value::error::DecodeError::InputIncorrectlySized;
 use crate::value::pointer::Pointer;
 use crate::{likely, unlikely};
 use error::Result;
@@ -304,7 +303,7 @@ impl Value {
     fn _find_root(data: &[u8]) -> Result<&Self> {
         // Data must be at least 2 bytes, and evenly sized
         if unlikely(data.is_empty() || data.len() % 2 != 0) {
-            return Err(InputIncorrectlySized);
+            return Err(DecodeError::InputIncorrectlySized);
         }
         // Root is 2 bytes at the end of the data
         let root = &data[(data.len() - 2)..];
