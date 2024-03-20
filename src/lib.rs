@@ -1,4 +1,5 @@
 mod encoder;
+mod scope;
 mod sharedkeys;
 mod value;
 
@@ -16,13 +17,17 @@ pub(crate) fn cold() {}
 
 #[inline]
 pub(crate) fn likely(b: bool) -> bool {
-    if !b { cold() }
+    if !b {
+        cold();
+    }
     b
 }
 
 #[inline]
 pub(crate) fn unlikely(b: bool) -> bool {
-    if b { cold() }
+    if b {
+        cold();
+    }
     b
 }
 

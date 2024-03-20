@@ -1,12 +1,17 @@
 use super::*;
 use crate::encoder::Encoder;
+use crate::sharedkeys::SharedKeys;
 use crate::value::ValueType;
 
 const PERSON_ENCODED: &[u8] = include_bytes!("../1person.fleece");
 const PEOPLE_ENCODED: &[u8] = include_bytes!("../1000people.fleece");
 
 fn decode_person_checks(person: &Value) {
-    assert_eq!(person.value_type(), ValueType::Dict, "Expected Person to be a Dict!");
+    assert_eq!(
+        person.value_type(),
+        ValueType::Dict,
+        "Expected Person to be a Dict!"
+    );
     let person_dict = person.as_dict().unwrap();
     assert_eq!(person_dict.len(), 21, "Expected Person to have 21 keys!");
     let age = person_dict
@@ -69,7 +74,9 @@ fn decode_people() {
 fn encode_person() {
     let original = Value::from_bytes(PERSON_ENCODED).expect("Failed to decode Fleece");
     let mut encoder = Encoder::new();
-    encoder.write_fleece(original).expect("Failed to write value!");
+    encoder
+        .write_fleece(original)
+        .expect("Failed to write value!");
     let res = encoder.finish();
     let value = Value::from_bytes(&res).unwrap();
 
@@ -82,29 +89,32 @@ fn encode_person() {
 fn encode_people() {
     let original = Value::from_bytes(PEOPLE_ENCODED).expect("Failed to decode Fleece");
     let mut encoder = Encoder::new();
-    encoder.write_fleece(original).expect("Failed to write value!");
+    encoder
+        .write_fleece(original)
+        .expect("Failed to write value!");
     let res = encoder.finish();
     let value = Value::from_bytes(&res).unwrap();
     decode_people_checks(value);
 }
 
-//#[test]
-//fn shared_keys() {
-//    let mut encoder = Encoder::new();
-//    encoder.set_shared_keys(SharedKeys::new());
-//    encoder.begin_dict();
-//    encoder.write_key("name").expect("Failed to write key!");
-//    encoder.write_value("John").expect("Failed to write value!");
-//    let shared_keys = encoder.shared_keys().unwrap();
-//    let res = encoder.finish();
-//    assert_eq!(shared_keys.len(), 1, "Expected 1 shared key!");
-//    let value = Value::from_bytes(&res).expect("Failed to decode Fleece");
-//    let dict = value.as_dict().expect("Expected value to be a Dict!");
-//    let name = dict.get("name").expect("Expected Dict to have key 'name'!");
-//    assert_eq!(
-//        name.value_type(),
-//        ValueType::String,
-//        "Expected name to be a String!"
-//    );
-//    assert_eq!(name.to_str(), "John", "Expected name to be 'John'!");
-//}
+#[test]
+fn shared_keys() {
+    let mut encoder = Encoder::new();
+    encoder.set_shared_keys(SharedKeys::new());
+    encoder.begin_dict();
+    encoder.write_key("name").expect("Failed to write key!");
+    encoder.write_value("John").expect("Failed to write value!");
+    let shared_keys = encoder.shared_keys().unwrap();
+    let res = encoder.finish();
+    assert_eq!(shared_keys.len(), 1, "Expected 1 shared key!");
+    let value = Value::from_bytes(&res).expect("Failed to decode Fleece");
+    let dict = value.as_dict().expect("Expected value to be a Dict!");
+    let name = dict.get("name").expect("Expected Dict to have key 'name'!");
+    assert_eq!(
+        name.value_type(),
+        ValueType::String,
+        "Expected name to be a String!"
+    );
+    assert_eq!(name.to_str(), "John", "Expected name to be 'John'!");
+}
+

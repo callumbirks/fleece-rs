@@ -8,6 +8,8 @@ codegen-units = 1
 
 [dependencies]
 thiserror = "1.0.56"
+dashmap = "5.5.3"
+rangemap = "1.5.1"
 
 [dev-dependencies]
 criterion = { version = "0.5.1" }

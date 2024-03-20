@@ -1,18 +1,19 @@
+use dashmap::DashMap;
+
 use crate::encoder::Encoder;
 use crate::value::ValueType;
 use crate::Value;
-use std::collections::HashMap;
 use std::io::Write;
+use std::pin::Pin;
+use std::ptr::NonNull;
 use std::rc::Rc;
-use std::sync::RwLock;
+use std::sync::atomic::{AtomicU16, Ordering};
 
-#[derive(Default)]
 pub struct SharedKeys {
-    map: HashMap<Rc<str>, u16>,
-    reverse_map: HashMap<u16, Rc<str>>,
+    map: Pin<Box<DashMap<Box<str>, u16>>>,
+    reverse_map: DashMap<u16, NonNull<Box<str>>>,
     // `RwLock` allows multi-read and single-write access
-    lock: RwLock<()>,
-    len: u16,
+    len: AtomicU16,
 }
 
 impl SharedKeys {
@@ -21,7 +22,12 @@ impl SharedKeys {
     const MAX_KEY_LENGTH: u16 = 16;
 
     pub fn new() -> Self {
-        Self::default()
+        let map = Box::pin(DashMap::default());
+        Self {
+            map,
+            reverse_map: DashMap::default(),
+            len: AtomicU16::new(0),
+        }
     }
 
     pub fn from_state_bytes(data: &[u8]) -> Option<Self> {
@@ -50,24 +56,21 @@ impl SharedKeys {
     }
 
     pub fn write_state(&self, encoder: &mut Encoder<impl Write>) -> Option<()> {
-        let _read_guard = self.lock.read().unwrap();
-        encoder.begin_array(self.len as usize);
-        for key in self.map.keys() {
-            encoder.write_value::<_, str>(key).ok()?;
+        encoder.begin_array(self.len.load(Ordering::SeqCst) as usize);
+        for entry in self.map.iter() {
+            encoder.write_value::<_, str>(entry.key()).ok()?;
         }
         encoder.end_array().ok()
     }
 
-    pub fn len(&self) -> usize {
-        let _read_guard = self.lock.read().unwrap();
-        self.len as usize
+    pub fn len(&self) -> u16 {
+        self.len.load(Ordering::SeqCst)
     }
 
     /// Fetch the int key corresponding to the given string key, if it exists
     pub fn encode(&self, string_key: &str) -> Option<u16> {
-        let _read_guard = self.lock.read().unwrap();
-        if let Some(key) = self.map.get(string_key) {
-            return Some(*key);
+        if let Some(entry) = self.map.get(string_key) {
+            return Some(*entry.value());
         }
         None
     }
@@ -83,13 +86,13 @@ impl SharedKeys {
     }
 
     pub fn decode(&self, int_key: u16) -> Option<&str> {
-        let _read_guard = self.lock.read().unwrap();
-        self.reverse_map.get(&int_key).map(|s| &**s)
+        self.reverse_map
+            .get(&int_key)
+            .map(|s| unsafe { s.value().as_ref().as_ref() })
     }
 
     pub fn can_add(&self, key: &str) -> bool {
-        let _read_guard = self.lock.read().unwrap();
-        self.len < SharedKeys::MAX_KEYS
+        self.len() < SharedKeys::MAX_KEYS
             && key.len() <= SharedKeys::MAX_KEY_LENGTH as usize
             && SharedKeys::can_encode(key)
     }
@@ -103,18 +106,27 @@ impl SharedKeys {
         true
     }
 
-    fn _insert_owned_key(&mut self, key: &Rc<str>) -> Option<u16> {
+    fn _insert_owned_key(&mut self, key: &str) -> Option<u16> {
         // Unwrap is safe here, because `write` only errors if the lock is poisoned, which can only
         // happen if a panic occurs while holding the lock. We don't panic while holding the lock
-        let _write_guard = self.lock.write().unwrap();
         if self.map.contains_key(key) {
             return None;
         }
-        let value = self.len;
-        self.map.insert(key.clone(), value);
-        self.reverse_map.insert(value, key.clone());
-        self.len += 1;
+        let value = self.len();
+        let boxed_key = key.to_string().into_boxed_str();
+        self.map.insert(boxed_key, value);
+        let entry_ref = self.map.get(key).unwrap();
+        // self.map is inside a PinBox, so this is safe
+        self.reverse_map
+            .insert(value, NonNull::from(entry_ref.key()));
+        self.len.fetch_add(1, Ordering::SeqCst);
         Some(value)
+    }
+}
+
+impl Default for SharedKeys {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -123,8 +135,10 @@ impl Clone for SharedKeys {
         Self {
             map: self.map.clone(),
             reverse_map: self.reverse_map.clone(),
-            lock: RwLock::new(()),
-            len: self.len,
+            len: AtomicU16::new(self.len()),
         }
     }
 }
+
+unsafe impl Send for SharedKeys {}
+unsafe impl Sync for SharedKeys {}

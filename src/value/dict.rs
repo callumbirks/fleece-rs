@@ -18,23 +18,16 @@ pub struct Element<'a> {
 }
 
 impl Dict {
-    #[allow(clippy::inline_always)]
-    #[allow(clippy::transmute_ptr_to_ptr)]
-    #[inline(always)]
     /// Transmutes a [`Value`] to a [`Dict`].
     /// # Safety
     /// You should validate the dict created with this function, otherwise it cannot be
     /// considered valid.
+    #[allow(clippy::transmute_ptr_to_ptr)]
+    #[inline]
     pub(super) fn from_value(value: &Value) -> &Self {
         unsafe { std::mem::transmute(value) }
     }
 
-    //pub fn get<Q: ?Sized>(&self, k: &Q) -> Option<&V>
-    //    where
-    //        K: Borrow<Q>,
-    //        Q: Hash + Eq,
-    //{
-    //    self.base.get(k)
     pub fn contains_key<R>(&self, key: &R) -> bool
     where
         R: ?Sized + Borrow<str>,
@@ -46,7 +39,7 @@ impl Dict {
     where
         R: ?Sized + Borrow<str>,
     {
-        let key = key.borrow();
+        let key: &str = key.borrow();
         // Convert the key to a Value for easy comparison
         let mut key_vec = Vec::with_capacity(key.len() + 1);
         key.write_fleece_to(&mut key_vec, false).ok()?;
@@ -65,7 +58,7 @@ impl Dict {
             // `size/2 < size`. Thus `left + size/2 < left + size`, which
             // coupled with the `left + size <= self.len()` invariant means
             // we have `left + size/2 < self.len()`, and this is in-bounds.
-            let elem = unsafe { self.get_unchecked(mid) };
+            let elem = unsafe { self._get_unchecked(mid) };
             let cmp = Value::dict_key_cmp(key, elem.key, self.is_wide());
 
             // This control flow produces conditional moves, which results in
@@ -88,19 +81,12 @@ impl Dict {
         None
     }
 
-    unsafe fn get_unchecked(&self, index: usize) -> Element {
-        let offset = 2 * index;
-        let key = self.array.get_unchecked(offset);
-        let val = self.array.get_unchecked(offset + 1);
-        Element { key, val }
-    }
-
     /// The first key-value pair in the dict
     pub fn first(&self) -> Option<Element> {
         if self.len() == 0 {
             return None;
         }
-        Some(unsafe { self.get_unchecked(0) })
+        Some(unsafe { self._get_unchecked(0) })
     }
 
     pub fn is_wide(&self) -> bool {
@@ -114,6 +100,15 @@ impl Dict {
     /// The number of key-value pairs in this dict.
     pub fn len(&self) -> usize {
         self.array.len() / 2
+    }
+}
+
+impl Dict {
+    unsafe fn _get_unchecked(&self, index: usize) -> Element {
+        let offset = 2 * index;
+        let key = self.array.get_unchecked(offset);
+        let val = self.array.get_unchecked(offset + 1);
+        Element { key, val }
     }
 }
 

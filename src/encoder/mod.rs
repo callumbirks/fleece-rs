@@ -1,10 +1,10 @@
 use crate::encoder::error::EncodeError;
 use crate::encoder::value_stack::{Collection, CollectionStack, DictKey};
 use crate::sharedkeys::SharedKeys;
+use crate::value;
 use crate::value::pointer::Pointer as ValuePointer;
 use crate::value::sized::SizedValue;
 use crate::value::{pointer, ValueType};
-use crate::value;
 use error::Result;
 use std::borrow::Borrow;
 use std::cmp::Ordering;
