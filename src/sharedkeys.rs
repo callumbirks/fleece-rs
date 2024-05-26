@@ -81,8 +81,7 @@ impl SharedKeys {
         if !self.can_add(key) {
             return None;
         }
-        let owned_key = Rc::from(key);
-        self._insert_owned_key(&owned_key)
+        self._insert_owned_key(key)
     }
 
     pub fn decode(&self, int_key: u16) -> Option<&str> {

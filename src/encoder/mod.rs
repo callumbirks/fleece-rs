@@ -9,10 +9,14 @@ use error::Result;
 use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::io::Write;
+use std::sync::Arc;
 
 mod encodable;
 mod error;
 mod value_stack;
+
+pub use encodable::AsBoxedValue;
+use crate::scope::Scope;
 
 struct NullValue;
 struct UndefinedValue;
@@ -285,6 +289,21 @@ impl<W: Write> Encoder<W> {
     /// [`Encoder::shared_keys`] to get the updated shared keys.
     pub fn set_shared_keys(&mut self, shared_keys: SharedKeys) {
         self.shared_keys = Some(shared_keys);
+    }
+}
+
+impl<W: Write> Encoder<W>
+where Arc<[u8]>: From<W>
+{
+    pub fn finish_scoped(mut self) -> Option<Arc<Scope>> {
+        self._end();
+        self.out.flush().ok();
+        let out = self.out;
+        let shared_keys = match self.shared_keys {
+            None => None,
+            Some(sk) => Some(Arc::new(sk))
+        };
+        Scope::new_alloced(out, shared_keys)
     }
 }
 

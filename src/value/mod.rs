@@ -131,7 +131,7 @@ impl Value {
     pub fn from_bytes(data: &[u8]) -> Result<&Self> {
         let root = Self::_find_root(data)?;
         let data_end = unsafe { data.as_ptr().add(data.len()) };
-        // wide parameter doesn't matter here, as its only used for pointers, and find_root will
+        // wide parameter doesn't matter here, as it's only used for pointers, and find_root will
         // never return a pointer.
         root._validate::<false>(false, data.as_ptr(), data_end)?;
         Ok(root)
@@ -383,7 +383,9 @@ impl Value {
     pub(crate) fn dict_key_cmp(value1: &Self, value2: &Self, is_wide: bool) -> Ordering {
         debug_assert!(matches!(value1.value_type(), ValueType::String | ValueType::Pointer | ValueType::Short));
         debug_assert!(matches!(value2.value_type(), ValueType::String | ValueType::Pointer | ValueType::Short));
-        match (value1.value_type(), value2.value_type()) {
+        let value_type1 = value1.value_type();
+        let value_type2 = value2.value_type();
+        match (value_type1, value_type2) {
             // Inline strings
             (ValueType::String, ValueType::String) => value1.to_str().cmp(value2.to_str()),
             // Pointers to strings

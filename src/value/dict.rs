@@ -1,10 +1,13 @@
-use super::array;
 use super::array::Array;
-use crate::encoder::Encodable;
+use super::{array, ValueType};
+use crate::encoder::{AsBoxedValue, Encodable};
+use crate::scope::Scope;
+use crate::sharedkeys::SharedKeys;
 use crate::value::Value;
 use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::ops::Index;
+use std::sync::Arc;
 
 // A Dict is just an Array, but the elements are alternating key, value
 #[repr(transparent)]
@@ -40,10 +43,7 @@ impl Dict {
         R: ?Sized + Borrow<str>,
     {
         let key: &str = key.borrow();
-        // Convert the key to a Value for easy comparison
-        let mut key_vec = Vec::with_capacity(key.len() + 1);
-        key.write_fleece_to(&mut key_vec, false).ok()?;
-        let key: &Value = unsafe { std::mem::transmute(key_vec.as_slice()) };
+        let key: Box<Value> = self.encode_key(key)?;
 
         // We use binary search to find the key. This is possible because the dict keys are sorted.
         // This binary search implementation is borrowed from https://doc.rust-lang.org/std/vec/struct.Vec.html#method.binary_search_by
@@ -59,7 +59,7 @@ impl Dict {
             // coupled with the `left + size <= self.len()` invariant means
             // we have `left + size/2 < self.len()`, and this is in-bounds.
             let elem = unsafe { self._get_unchecked(mid) };
-            let cmp = Value::dict_key_cmp(key, elem.key, self.is_wide());
+            let cmp = Value::dict_key_cmp(&key, elem.key, self.is_wide());
 
             // This control flow produces conditional moves, which results in
             // fewer branches and instructions than if/else or matching on
@@ -109,6 +109,46 @@ impl Dict {
         let key = self.array.get_unchecked(offset);
         let val = self.array.get_unchecked(offset + 1);
         Element { key, val }
+    }
+
+    /// Attempt to encode a key string to a Value. If this Dict uses SharedKeys, and they can be
+    /// found, and the key exists in the shared_keys, the returned value will be a short with the
+    /// corresponding encoded key.
+    /// Otherwise, the returned Value will be a String containing the input key.
+    fn encode_key(&self, key: &str) -> Option<Box<Value>> {
+        if self.uses_shared_keys() {
+            let first = unsafe { self._get_unchecked(0).key };
+            if let Some(shared_keys) = Scope::find_shared_keys(first.bytes.as_ptr()) {
+                if let Some(encoded) = shared_keys.encode(key) {
+                    return encoded.as_boxed_value().ok();
+                }
+            }
+        }
+        key.as_boxed_value().ok()
+    }
+
+    fn uses_shared_keys(&self) -> bool {
+        let len = self.len();
+        if len == 0 {
+            return false;
+        }
+        let first_key = unsafe { self._get_unchecked(0).key };
+
+        if Dict::is_parent_key(first_key) {
+            if len > 1 {
+                let second_key = unsafe { self._get_unchecked(1).key };
+                second_key.value_type() == ValueType::Short
+            } else {
+                false
+            }
+        } else {
+            first_key.value_type() == ValueType::Short
+        }
+    }
+
+    fn is_parent_key(value: &Value) -> bool {
+        const PARENT_KEY: [u8; 2] = [(crate::value::tag::SHORT << 4) | 0x08, 0];
+        unsafe { value.bytes[..2] == PARENT_KEY }
     }
 }
 

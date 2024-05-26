@@ -1,6 +1,6 @@
 use crate::encoder::value_stack;
 use crate::encoder::{Encodable, NullValue, UndefinedValue};
-use crate::value;
+use crate::{value, Value};
 use crate::value::sized::SizedValue;
 use crate::value::{array, varint};
 use std::io::{Result, Write};
@@ -443,5 +443,18 @@ impl Encodable for value_stack::Dict {
 
     fn to_value(&self) -> Option<SizedValue> {
         None
+    }
+}
+
+pub trait AsBoxedValue {
+    fn as_boxed_value(&self) -> std::io::Result<Box<crate::Value>>;
+}
+
+impl<T> AsBoxedValue for T where T: Encodable + ?Sized {
+    fn as_boxed_value(&self) -> std::io::Result<Box<Value>> {
+        let mut alloced = Vec::with_capacity(self.fleece_size());
+        self.write_fleece_to(&mut alloced, false)?;
+        let boxed = alloced.into_boxed_slice();
+        Ok(unsafe { std::mem::transmute(boxed) })
     }
 }

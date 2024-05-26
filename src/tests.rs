@@ -1,5 +1,7 @@
+use std::sync::Arc;
 use super::*;
 use crate::encoder::Encoder;
+use crate::scope::Scope;
 use crate::sharedkeys::SharedKeys;
 use crate::value::ValueType;
 
@@ -104,10 +106,11 @@ fn shared_keys() {
     encoder.begin_dict();
     encoder.write_key("name").expect("Failed to write key!");
     encoder.write_value("John").expect("Failed to write value!");
-    let shared_keys = encoder.shared_keys().unwrap();
+    let shared_keys = Arc::new(encoder.shared_keys().unwrap());
     let res = encoder.finish();
+    let scope = Scope::new_alloced(res, Some(shared_keys.clone())).expect("Failed to create Scope");
     assert_eq!(shared_keys.len(), 1, "Expected 1 shared key!");
-    let value = Value::from_bytes(&res).expect("Failed to decode Fleece");
+    let value = scope.root.as_ref().expect("No root in Scope").upgrade().expect("No root in Scope");
     let dict = value.as_dict().expect("Expected value to be a Dict!");
     let name = dict.get("name").expect("Expected Dict to have key 'name'!");
     assert_eq!(
