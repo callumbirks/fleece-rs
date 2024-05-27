@@ -22,11 +22,12 @@ impl Scope {
             .flatten()
     }
 
+    /// Create a new scope, which keeps its data allocated.
     pub fn new_alloced(
         data: impl Into<Arc<[u8]>>,
         shared_keys: Option<Arc<SharedKeys>>,
     ) -> Option<Arc<Self>> {
-        let scope_map = SCOPE_MAP.get_or_init(|| RwLock::new(RangeMap::new()));
+        let scope_map = Self::scope_map();
         let mut scope_map = scope_map.write().ok()?;
 
         let alloced_data = data.into();
@@ -35,10 +36,7 @@ impl Scope {
         let start = alloced_data.as_ptr() as usize;
         let end = alloced_data.as_ptr() as usize + alloced_data.len();
 
-        let root = Value::from_bytes(&alloced_data).map_or_else(
-            |_| ptr::slice_from_raw_parts(ptr::null::<u8>(), 0) as *const Value,
-            |v| v as *const Value,
-        );
+        let root = Self::root_or_null(&alloced_data);
 
         let scope = Arc::new(Scope {
             shared_keys,
@@ -49,6 +47,31 @@ impl Scope {
         });
 
         // TODO: Figure out how to protect against overlaps
+        scope_map.insert(start..end, ScopeEntry(Arc::downgrade(&scope)));
+
+        Some(scope)
+    }
+
+    /// Create a new Scope, which does not keep its data allocated.
+    pub fn new_weak(data: Weak<[u8]>, shared_keys: Option<Arc<SharedKeys>>) -> Option<Arc<Self>> {
+        let scope_map = Self::scope_map();
+        let mut scope_map = scope_map.write().ok()?;
+
+        let alloced_data = data.upgrade()?;
+
+        let start = alloced_data.as_ptr() as usize;
+        let end = alloced_data.as_ptr() as usize + alloced_data.len();
+
+        let root = Self::root_or_null(&alloced_data);
+
+        let scope = Arc::new(Scope {
+            shared_keys,
+            data,
+            alloced_data: None,
+            root,
+            registered: AtomicBool::new(true),
+        });
+
         scope_map.insert(start..end, ScopeEntry(Arc::downgrade(&scope)));
 
         Some(scope)
@@ -72,6 +95,17 @@ impl Scope {
         } else {
             self.data.upgrade()
         }
+    }
+
+    fn scope_map() -> &'static RwLock<RangeMap<usize, ScopeEntry>> {
+        SCOPE_MAP.get_or_init(|| RwLock::new(RangeMap::new()))
+    }
+
+    fn root_or_null(data: &[u8]) -> *const Value {
+        Value::from_bytes(data).map_or_else(
+            |_| ptr::slice_from_raw_parts(ptr::null::<u8>(), 0) as *const Value,
+            |v| v as *const Value,
+        )
     }
 
     fn containing(data: *const u8) -> Option<Arc<Scope>> {

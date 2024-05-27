@@ -113,12 +113,14 @@ fn shared_keys() {
     encoder
         .write_value("3250 Olcott St")
         .expect("Failed to write value!");
+
     let shared_keys = Arc::new(encoder.shared_keys().unwrap());
     let scope = encoder.finish_scoped().expect("Failed to create Scope");
     assert_eq!(shared_keys.len(), 1, "Expected 1 shared key!");
-    let value_alloc = scope.root().expect("Scope has no root Value!");
-    let value = value_alloc.value();
-    println!("{:?}", value);
+
+    let scoped_value = scope.root().expect("Scope has no root Value!");
+    let value = scoped_value.value();
+
     let dict = value.as_dict().expect("Expected value to be a Dict!");
     let name = dict.get("name").expect("Expected Dict to have key 'name'!");
     let address = dict
@@ -141,3 +143,15 @@ fn shared_keys() {
         "Address did not match expected!"
     );
 }
+
+#[test]
+fn encode_people_shared_keys() {
+    let original = Value::from_bytes(PEOPLE_ENCODED).expect("Failed to decode Fleece");
+    let mut encoder = Encoder::new();
+    encoder.set_shared_keys(SharedKeys::new());
+    encoder.write_fleece(original).expect("Failed to write value!");
+    let res = encoder.finish_scoped().expect("Failed to create Scope!");
+    let scoped_value = res.root().expect("Scope has no root!");
+    decode_people_checks(scoped_value.value());
+}
+

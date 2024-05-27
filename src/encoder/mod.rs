@@ -126,7 +126,6 @@ impl<W: Write> Encoder<W> {
                 let value = value.as_dict().unwrap();
                 self.begin_dict();
                 for elem in value {
-                    // TODO: SHARED KEYS (Short)
                     let key = if elem.key.value_type() == ValueType::Pointer {
                         unsafe {
                             ValuePointer::from_value(elem.key)
