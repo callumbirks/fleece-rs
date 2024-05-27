@@ -77,7 +77,6 @@ impl SharedKeys {
 
     /// Fetch the int key corresponding to the given string key, create it if it doesn't exist
     pub fn encode_and_insert(&mut self, key: &str) -> Option<u16> {
-        debug_assert!(self.can_add(key));
         if !self.can_add(key) {
             return None;
         }

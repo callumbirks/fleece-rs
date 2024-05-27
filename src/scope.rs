@@ -1,4 +1,6 @@
 use std::ops::Deref;
+use std::ptr;
+use std::ptr::NonNull;
 use std::sync::{atomic::AtomicBool, Arc, OnceLock, RwLock, Weak};
 
 use rangemap::RangeMap;
@@ -9,16 +11,21 @@ pub struct Scope {
     pub shared_keys: Option<Arc<SharedKeys>>,
     pub data: Weak<[u8]>,
     pub alloced_data: Option<Arc<[u8]>>,
-    pub root: Option<Weak<Value>>,
+    root: *const Value,
     registered: AtomicBool,
 }
 
 impl Scope {
     pub fn find_shared_keys(containing_data: *const u8) -> Option<Arc<SharedKeys>> {
-        Scope::containing(containing_data).map(|s| s.shared_keys.clone()).flatten()
+        Scope::containing(containing_data)
+            .map(|s| s.shared_keys.clone())
+            .flatten()
     }
 
-    pub fn new_alloced(data: impl Into<Arc<[u8]>>, shared_keys: Option<Arc<SharedKeys>>) -> Option<Arc<Self>> {
+    pub fn new_alloced(
+        data: impl Into<Arc<[u8]>>,
+        shared_keys: Option<Arc<SharedKeys>>,
+    ) -> Option<Arc<Self>> {
         let scope_map = SCOPE_MAP.get_or_init(|| RwLock::new(RangeMap::new()));
         let mut scope_map = scope_map.write().ok()?;
 
@@ -28,9 +35,10 @@ impl Scope {
         let start = alloced_data.as_ptr() as usize;
         let end = alloced_data.as_ptr() as usize + alloced_data.len();
 
-        let root = Value::from_bytes(&alloced_data)
-            .ok()
-            .map(|v| unsafe { Weak::from_raw(v as *const Value) });
+        let root = Value::from_bytes(&alloced_data).map_or_else(
+            |_| ptr::slice_from_raw_parts(ptr::null::<u8>(), 0) as *const Value,
+            |v| v as *const Value,
+        );
 
         let scope = Arc::new(Scope {
             shared_keys,
@@ -44,6 +52,26 @@ impl Scope {
         scope_map.insert(start..end, ScopeEntry(Arc::downgrade(&scope)));
 
         Some(scope)
+    }
+
+    /// Return a `ScopedValue` containing the root Value belonging to this Scope.
+    pub fn root(&self) -> Option<ScopedValue> {
+        if let Some(data) = self.data() {
+            Some(ScopedValue {
+                data,
+                value: NonNull::from(unsafe { &*self.root }),
+            })
+        } else {
+            None
+        }
+    }
+
+    pub fn data(&self) -> Option<Arc<[u8]>> {
+        if let Some(alloced_data) = &self.alloced_data {
+            Some(alloced_data.clone())
+        } else {
+            self.data.upgrade()
+        }
     }
 
     fn containing(data: *const u8) -> Option<Arc<Scope>> {
@@ -62,6 +90,20 @@ impl Scope {
         }
 
         None
+    }
+}
+
+/// Holds a reference to a `Value` and also retains the data which contains the Value.
+pub struct ScopedValue {
+    data: Arc<[u8]>,
+    value: NonNull<Value>,
+}
+
+impl ScopedValue {
+    pub fn value(&self) -> &Value {
+        unsafe {
+            self.value.as_ref()
+        }
     }
 }
 
@@ -103,5 +145,8 @@ impl Deref for ScopeEntry {
         &self.0
     }
 }
+
+unsafe impl Send for Scope {}
+unsafe impl Sync for Scope {}
 
 static SCOPE_MAP: OnceLock<RwLock<RangeMap<usize, ScopeEntry>>> = OnceLock::new();

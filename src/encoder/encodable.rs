@@ -34,9 +34,9 @@ impl Encodable for i64 {
         }
     }
     #[allow(clippy::cast_possible_truncation)]
-    fn to_value(&self) -> Option<SizedValue> {
+    fn to_sized_value(&self) -> Option<SizedValue> {
         if *self <= 2047 || *self >= -2048 {
-            (*self as i16).to_value()
+            (*self as i16).to_sized_value()
         } else {
             None
         }
@@ -68,9 +68,9 @@ impl Encodable for u64 {
     }
 
     #[allow(clippy::cast_possible_truncation)]
-    fn to_value(&self) -> Option<SizedValue> {
+    fn to_sized_value(&self) -> Option<SizedValue> {
         if *self <= 2047 {
-            (*self as u16).to_value()
+            (*self as u16).to_sized_value()
         } else {
             None
         }
@@ -83,7 +83,7 @@ impl Encodable for u16 {
         if *self > 2047 {
             return u64::from(*self).write_fleece_to(writer, is_wide);
         }
-        let Some(val) = self.to_value() else {
+        let Some(val) = self.to_sized_value() else {
             unreachable!();
         };
         val.write_fleece_to(writer, is_wide)
@@ -93,7 +93,7 @@ impl Encodable for u16 {
         2
     }
 
-    fn to_value(&self) -> Option<SizedValue> {
+    fn to_sized_value(&self) -> Option<SizedValue> {
         if *self > 2047 {
             return None;
         }
@@ -109,7 +109,7 @@ impl Encodable for i16 {
         if *self > 2047 || *self < -2048 {
             return i64::from(*self).write_fleece_to(writer, is_wide);
         }
-        let Some(val) = self.to_value() else {
+        let Some(val) = self.to_sized_value() else {
             unreachable!();
         };
         val.write_fleece_to(writer, is_wide)
@@ -118,7 +118,7 @@ impl Encodable for i16 {
     fn fleece_size(&self) -> usize {
         2
     }
-    fn to_value(&self) -> Option<SizedValue> {
+    fn to_sized_value(&self) -> Option<SizedValue> {
         if *self > 2047 || *self < -2048 {
             return None;
         }
@@ -142,7 +142,7 @@ impl Encodable for f32 {
         6
     }
 
-    fn to_value(&self) -> Option<SizedValue> {
+    fn to_sized_value(&self) -> Option<SizedValue> {
         None
     }
 }
@@ -160,7 +160,7 @@ impl Encodable for f64 {
         10
     }
 
-    fn to_value(&self) -> Option<SizedValue> {
+    fn to_sized_value(&self) -> Option<SizedValue> {
         None
     }
 }
@@ -192,7 +192,7 @@ impl Encodable for bool {
         2
     }
 
-    fn to_value(&self) -> Option<SizedValue> {
+    fn to_sized_value(&self) -> Option<SizedValue> {
         if *self {
             Some(SizedValue::from_narrow(value::constants::TRUE))
         } else {
@@ -210,7 +210,7 @@ impl Encodable for NullValue {
         2
     }
 
-    fn to_value(&self) -> Option<SizedValue> {
+    fn to_sized_value(&self) -> Option<SizedValue> {
         Some(SizedValue::from_narrow(value::constants::NULL))
     }
 }
@@ -224,7 +224,7 @@ impl Encodable for UndefinedValue {
         2
     }
 
-    fn to_value(&self) -> Option<SizedValue> {
+    fn to_sized_value(&self) -> Option<SizedValue> {
         Some(SizedValue::from_narrow(value::constants::UNDEFINED))
     }
 }
@@ -301,7 +301,7 @@ impl Encodable for [u8] {
         }
     }
 
-    fn to_value(&self) -> Option<SizedValue> {
+    fn to_sized_value(&self) -> Option<SizedValue> {
         match self.len() {
             0 => Some(SizedValue::from_narrow([value::tag::DATA, 0])),
             1 => Some(SizedValue::from_narrow([value::tag::DATA | 0x01, self[0]])),
@@ -319,7 +319,7 @@ impl Encodable for str {
         self.as_bytes().fleece_size()
     }
 
-    fn to_value(&self) -> Option<SizedValue> {
+    fn to_sized_value(&self) -> Option<SizedValue> {
         match self.len() {
             0 => Some(SizedValue::from_narrow([value::tag::STRING, 0])),
             1 => Some(SizedValue::from_narrow([
@@ -348,10 +348,10 @@ where
             None => 2,
         }
     }
-    fn to_value(&self) -> Option<SizedValue> {
+    fn to_sized_value(&self) -> Option<SizedValue> {
         match self {
-            Some(v) => v.to_value(),
-            None => NullValue.to_value(),
+            Some(v) => v.to_sized_value(),
+            None => NullValue.to_sized_value(),
         }
     }
 }
@@ -375,7 +375,7 @@ impl Encodable for SizedValue {
         }
     }
 
-    fn to_value(&self) -> Option<SizedValue> {
+    fn to_sized_value(&self) -> Option<SizedValue> {
         Some(self.clone())
     }
 }
@@ -408,7 +408,7 @@ impl Encodable for value_stack::Array {
         2
     }
 
-    fn to_value(&self) -> Option<SizedValue> {
+    fn to_sized_value(&self) -> Option<SizedValue> {
         None
     }
 }
@@ -441,7 +441,7 @@ impl Encodable for value_stack::Dict {
         2
     }
 
-    fn to_value(&self) -> Option<SizedValue> {
+    fn to_sized_value(&self) -> Option<SizedValue> {
         None
     }
 }

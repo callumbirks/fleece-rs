@@ -15,8 +15,8 @@ mod encodable;
 mod error;
 mod value_stack;
 
-pub use encodable::AsBoxedValue;
 use crate::scope::Scope;
+pub use encodable::AsBoxedValue;
 
 struct NullValue;
 struct UndefinedValue;
@@ -31,7 +31,7 @@ pub trait Encodable {
     /// Construct a [`SizedValue`] from this value, if this value can be represented in 2 bytes of Fleece. Otherwise,
     /// return [`None`].
     /// Use [`SizedValue::from_narrow`] to construct the value.
-    fn to_value(&self) -> Option<SizedValue>;
+    fn to_sized_value(&self) -> Option<SizedValue>;
 }
 
 #[derive(Default)]
@@ -60,33 +60,11 @@ impl<W: Write> Encoder<W> {
     }
 
     pub fn write_key(&mut self, key: &str) -> Result<()> {
-        if let Some(val) = key.to_value() {
-            let Some(Collection::Dict(dict)) = self.collection_stack.top_mut() else {
-                return Err(EncodeError::DictNotOpen);
-            };
-            // If the key is small enough to fit in a fixed-width value, inline it
-            dict.push_key(DictKey::Inline(val))
-                .ok_or_else(|| EncodeError::DictWaitingForValue)
-        } else if let Some(shared_keys) = &mut self.shared_keys {
-            let Some(Collection::Dict(dict)) = self.collection_stack.top_mut() else {
-                return Err(EncodeError::DictNotOpen);
-            };
-            // If we have shared keys, insert the key into the shared keys and add the corresponding int key to the Dict
-            let int_key = shared_keys
-                .encode_and_insert(key)
-                .ok_or_else(|| EncodeError::SharedKeysInvalidKey)?;
-            // Unwrap is safe here because `u16::to_value` will only fail if the value is > 2047, which it will never
-            // be because the shared_keys holds max 2048 keys (and the first one is 0)
-            dict.push_key(DictKey::Shared(int_key))
-                .ok_or_else(|| EncodeError::DictWaitingForValue)
+        if let Some(val) = key.to_sized_value() {
+            // Keys which are small enough are inlined.
+            self._write_key_narrow(val)
         } else {
-            // If we don't have shared keys, write the key to the output buffer and add a pointer to it in the Dict
-            let offset = self._write(key, false)?;
-            let Some(Collection::Dict(dict)) = self.collection_stack.top_mut() else {
-                return Err(EncodeError::DictNotOpen);
-            };
-            dict.push_key(DictKey::Pointer(key.into(), offset))
-                .ok_or_else(|| EncodeError::DictWaitingForValue)
+            self._write_key(key)
         }
     }
 
@@ -102,7 +80,7 @@ impl<W: Write> Encoder<W> {
         }
 
         let value = value.borrow();
-        if let Some(val) = value.to_value() {
+        if let Some(val) = value.to_sized_value() {
             // If the value can fit in a fixed-width Value, just push it to the current collection
             self._push(val)
         } else {
@@ -252,7 +230,7 @@ impl<W: Write> Encoder<W> {
                 DictKey::Inline(val) => self._write(val, is_wide)?,
                 DictKey::Shared(int_key) => {
                     // Unwrap is safe because u16::to_value only fails if > 2047, that's never the case for shared keys
-                    let val = int_key.to_value().unwrap();
+                    let val = int_key.to_sized_value().unwrap();
                     self._write(&val, is_wide)?
                 }
                 DictKey::Pointer(_, offset) => {
@@ -293,15 +271,18 @@ impl<W: Write> Encoder<W> {
 }
 
 impl<W: Write> Encoder<W>
-where Arc<[u8]>: From<W>
+where
+    Arc<[u8]>: From<W>,
 {
+    /// Finish encoding and allocate the result in a new `Scope`. That Scope will hold the
+    /// SharedKeys this encoder held (if any).
     pub fn finish_scoped(mut self) -> Option<Arc<Scope>> {
         self._end();
         self.out.flush().ok();
         let out = self.out;
         let shared_keys = match self.shared_keys {
             None => None,
-            Some(sk) => Some(Arc::new(sk))
+            Some(sk) => Some(Arc::new(sk)),
         };
         Scope::new_alloced(out, shared_keys)
     }
@@ -328,6 +309,45 @@ impl<W: Write> Encoder<W> {
         }
 
         Ok(offset)
+    }
+
+    /// If we have shared keys, try to encode the key using those. Otherwise, write the key as a
+    /// pointer.
+    fn _write_key(&mut self, key: &str) -> Result<()> {
+        if let Some(shared_keys) = &mut self.shared_keys {
+            let Some(Collection::Dict(dict)) = self.collection_stack.top_mut() else {
+                return Err(EncodeError::DictNotOpen);
+            };
+            // If we have shared keys, insert the key into the shared keys and add the corresponding int key to the Dict
+            let Some(int_key) = shared_keys.encode_and_insert(key) else {
+                return self._write_key_nonshared(key);
+            };
+            // Unwrap is safe here because `u16::to_value` will only fail if the value is > 2047, which it will never
+            // be because the shared_keys holds max 2048 keys (and the first one is 0)
+            dict.push_key(DictKey::Shared(int_key))
+                .ok_or_else(|| EncodeError::DictWaitingForValue)
+        } else {
+            self._write_key_nonshared(key)
+        }
+    }
+
+    fn _write_key_narrow(&mut self, val: SizedValue) -> Result<()> {
+        let Some(Collection::Dict(dict)) = self.collection_stack.top_mut() else {
+            return Err(EncodeError::DictNotOpen);
+        };
+        // If the key is small enough to fit in a fixed-width value, inline it
+        dict.push_key(DictKey::Inline(val))
+            .ok_or_else(|| EncodeError::DictWaitingForValue)
+    }
+
+    fn _write_key_nonshared(&mut self, key: &str) -> Result<()> {
+        // If we don't have shared keys, write the key to the output buffer and add a pointer to it in the Dict
+        let offset = self._write(key, false)?;
+        let Some(Collection::Dict(dict)) = self.collection_stack.top_mut() else {
+            return Err(EncodeError::DictNotOpen);
+        };
+        dict.push_key(DictKey::Pointer(key.into(), offset))
+            .ok_or_else(|| EncodeError::DictWaitingForValue)
     }
 
     /// Push a fixed-width Fleece value to the collection which is currently at the top of the stack.

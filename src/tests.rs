@@ -1,9 +1,9 @@
-use std::sync::Arc;
 use super::*;
 use crate::encoder::Encoder;
 use crate::scope::Scope;
 use crate::sharedkeys::SharedKeys;
 use crate::value::ValueType;
+use std::sync::Arc;
 
 const PERSON_ENCODED: &[u8] = include_bytes!("../1person.fleece");
 const PEOPLE_ENCODED: &[u8] = include_bytes!("../1000people.fleece");
@@ -106,18 +106,38 @@ fn shared_keys() {
     encoder.begin_dict();
     encoder.write_key("name").expect("Failed to write key!");
     encoder.write_value("John").expect("Failed to write value!");
+    // Keys with spaces cannot be encoded with SharedKeys, so this should be saved as a string
+    encoder
+        .write_key("Address Line 1")
+        .expect("Failed to write key!");
+    encoder
+        .write_value("3250 Olcott St")
+        .expect("Failed to write value!");
     let shared_keys = Arc::new(encoder.shared_keys().unwrap());
-    let res = encoder.finish();
-    let scope = Scope::new_alloced(res, Some(shared_keys.clone())).expect("Failed to create Scope");
+    let scope = encoder.finish_scoped().expect("Failed to create Scope");
     assert_eq!(shared_keys.len(), 1, "Expected 1 shared key!");
-    let value = scope.root.as_ref().expect("No root in Scope").upgrade().expect("No root in Scope");
+    let value_alloc = scope.root().expect("Scope has no root Value!");
+    let value = value_alloc.value();
+    println!("{:?}", value);
     let dict = value.as_dict().expect("Expected value to be a Dict!");
     let name = dict.get("name").expect("Expected Dict to have key 'name'!");
+    let address = dict
+        .get("Address Line 1")
+        .expect("Expected Dict to have key 'Address Line 1'!");
     assert_eq!(
         name.value_type(),
         ValueType::String,
         "Expected name to be a String!"
     );
+    assert_eq!(
+        address.value_type(),
+        ValueType::String,
+        "Expected address to be a String!"
+    );
     assert_eq!(name.to_str(), "John", "Expected name to be 'John'!");
+    assert_eq!(
+        address.to_str(),
+        "3250 Olcott St",
+        "Address did not match expected!"
+    );
 }
-
