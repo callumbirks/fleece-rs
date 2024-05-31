@@ -380,28 +380,31 @@ impl Encodable for SizedValue {
     }
 }
 
+fn write_valuestack_collection<W: Write>(writer: &mut W, tag: u8, len: usize, is_wide: bool) -> Result<usize> {
+    let mut buf = [0_u8; 2 + varint::MAX_LEN];
+    let written = 2 + if len >= array::VARINT_COUNT as usize {
+        varint::write(&mut buf[2..], len as u64)
+    } else {
+        0
+    };
+    #[allow(clippy::cast_possible_truncation)]
+        let inline_size = len.min(array::VARINT_COUNT as usize) as u16;
+
+    buf[0] = tag | (inline_size >> 8) as u8;
+    buf[1] = (inline_size & 0xFF) as u8;
+
+    if is_wide {
+        buf[0] |= 0x08;
+    }
+
+    writer.write_all(&buf[..written])?;
+    Ok(written)
+}
+
 // Just write the Array header, not the values
 impl Encodable for value_stack::Array {
     fn write_fleece_to<W: Write>(&self, writer: &mut W, is_wide: bool) -> Result<usize> {
-        let size = self.values.len();
-        let mut buf = [0_u8; 2 + varint::MAX_LEN];
-        let written = 2 + if size >= array::VARINT_COUNT as usize {
-            varint::write(&mut buf[2..], size as u64)
-        } else {
-            0
-        };
-        #[allow(clippy::cast_possible_truncation)]
-        let inline_size = size.min(array::VARINT_COUNT as usize) as u16;
-
-        buf[0] = value::tag::ARRAY | (inline_size >> 8) as u8;
-        buf[1] = (inline_size & 0xFF) as u8;
-
-        if is_wide {
-            buf[0] |= 0x08;
-        }
-
-        writer.write_all(&buf[..written])?;
-        Ok(written)
+        write_valuestack_collection(writer, value::tag::ARRAY, self.values.len(), is_wide)
     }
 
     fn fleece_size(&self) -> usize {
@@ -416,25 +419,7 @@ impl Encodable for value_stack::Array {
 impl Encodable for value_stack::Dict {
     // Just write the Dict header, not the values
     fn write_fleece_to<W: Write>(&self, writer: &mut W, is_wide: bool) -> Result<usize> {
-        let size = self.values.len();
-        let mut buf = [0_u8; 2 + varint::MAX_LEN];
-        let written = 2 + if size >= array::VARINT_COUNT as usize {
-            varint::write(&mut buf[2..], size as u64)
-        } else {
-            0
-        };
-        #[allow(clippy::cast_possible_truncation)]
-        let inline_size = size.min(array::VARINT_COUNT as usize) as u16;
-
-        buf[0] = value::tag::DICT | (inline_size >> 8) as u8;
-        buf[1] = (inline_size & 0xFF) as u8;
-
-        if is_wide {
-            buf[0] |= 0x08;
-        }
-
-        writer.write_all(&buf[..written])?;
-        Ok(written)
+        write_valuestack_collection(writer, value::tag::DICT, self.values.len(), is_wide)
     }
 
     fn fleece_size(&self) -> usize {
@@ -447,11 +432,11 @@ impl Encodable for value_stack::Dict {
 }
 
 pub trait AsBoxedValue {
-    fn as_boxed_value(&self) -> std::io::Result<Box<crate::Value>>;
+    fn as_boxed_value(&self) -> Result<Box<Value>>;
 }
 
 impl<T> AsBoxedValue for T where T: Encodable + ?Sized {
-    fn as_boxed_value(&self) -> std::io::Result<Box<Value>> {
+    fn as_boxed_value(&self) -> Result<Box<Value>> {
         let mut alloced = Vec::with_capacity(self.fleece_size());
         self.write_fleece_to(&mut alloced, false)?;
         let boxed = alloced.into_boxed_slice();

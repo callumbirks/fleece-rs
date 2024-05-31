@@ -21,7 +21,7 @@ impl Pointer {
         unsafe { std::mem::transmute(value) }
     }
 
-    pub(super) fn deref(&self, wide: bool, data_start: *const u8) -> Result<&Value> {
+    pub(super) fn deref_checked(&self, wide: bool, data_start: *const u8) -> Result<&Value> {
         if unlikely(wide) {
             if self.value.bytes.len() < 4 {
                 return Err(DecodeError::PointerTooSmall { actual: self.value.bytes.len(), expected: 4 });
@@ -51,7 +51,7 @@ impl Pointer {
         let target = unsafe { Value::_from_raw_unchecked(target_ptr, offset) };
 
         if unlikely(target.value_type() == ValueType::Pointer) {
-            return Pointer::from_value(target).deref(true, data_start);
+            return Pointer::from_value(target).deref_checked(true, data_start);
         }
         Ok(target)
     }

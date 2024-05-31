@@ -128,12 +128,15 @@ impl Value {
 
     /// Find and validate Fleece data in the given data. It will return a reference to the root
     /// value. The root value will usually be a Dict.
+    /// ## Errors
+    /// If the data given is not valid Fleece data
     pub fn from_bytes(data: &[u8]) -> Result<&Self> {
         let root = Self::_find_root(data)?;
-        let data_end = unsafe { data.as_ptr().add(data.len()) };
+        let data_start = data.as_ptr();
+        let data_end = unsafe { data_start.add(data.len()) };
         // wide parameter doesn't matter here, as it's only used for pointers, and find_root will
         // never return a pointer.
-        root._validate::<false>(false, data.as_ptr(), data_end)?;
+        root._validate::<false>(false, data_start, data_end)?;
         Ok(root)
     }
 
@@ -298,8 +301,6 @@ impl Value {
 impl Value {
     /// Finds the root Fleece value in the data. Performs basic validation that the data is
     /// correctly sized. To ensure the validity of the Fleece data, one should also call `RawValue::validate()`
-    #[allow(clippy::inline_always)]
-    #[inline(always)]
     fn _find_root(data: &[u8]) -> Result<&Self> {
         // Data must be at least 2 bytes, and evenly sized
         if unlikely(data.is_empty() || data.len() % 2 != 0) {
@@ -309,9 +310,9 @@ impl Value {
         let root = &data[(data.len() - 2)..];
         let root: &Value = unsafe { std::mem::transmute(root) };
 
-        if likely(root.value_type() == ValueType::Pointer) {
-            return Pointer::from_value(root).deref(false, data.as_ptr());
-        } else if unlikely(data.len() == 2) {
+        if root.value_type() == ValueType::Pointer {
+            return Pointer::from_value(root).deref_checked(false, data.as_ptr());
+        } else if data.len() == 2 {
             return Ok(root);
         }
         Err(DecodeError::RootNotPointer)
@@ -328,7 +329,7 @@ impl Value {
                 array::Array::from_value(self).validate(data_start, data_end)
             }
             ValueType::Pointer => {
-                let target = Pointer::from_value(self).deref(wide, data_start)?;
+                let target = Pointer::from_value(self).deref_checked(wide, data_start)?;
                 target._validate::<false>(wide, data_start, self.bytes.as_ptr())
             }
             _ => {
@@ -368,7 +369,7 @@ impl Value {
             ValueType::String | ValueType::Data => {
                 let data = self._get_data();
                 if let Some(last) = data.last() {
-                    last as *const u8 as usize - self.bytes.as_ptr() as usize + 1
+                    std::ptr::from_ref(last) as usize - self.bytes.as_ptr() as usize + 1
                 } else {
                     0
                 }
@@ -525,13 +526,13 @@ impl Debug for Value {
                 let array = self.as_array().unwrap();
                 let mut string = "Array [".to_string();
                 for (i, val) in array.into_iter().enumerate() {
-                    string.push_str(&format!("{:?}", val));
+                    string.push_str(&format!("{val:?}"));
                     if i < array.len() - 1 {
                         string.push_str(", ");
                     }
                 }
                 string.push(']');
-                write!(f, "{}", string)
+                write!(f, "{string}")
             }
             ValueType::Dict => {
                 let dict = self.as_dict().unwrap();
@@ -543,7 +544,7 @@ impl Debug for Value {
                     }
                 }
                 string.push('}');
-                write!(f, "{}", string)
+                write!(f, "{string}")
             }
             ValueType::Pointer => {
                 let pointer = Pointer::from_value(self);

@@ -7,7 +7,13 @@ use crate::value::Value;
 use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::ops::Index;
-use std::sync::Arc;
+
+use crate::encoder::AsBoxedValue;
+use crate::scope::Scope;
+use crate::value::Value;
+
+use super::{array, ValueType};
+use super::array::Array;
 
 // A Dict is just an Array, but the elements are alternating key, value
 #[repr(transparent)]
@@ -111,10 +117,10 @@ impl Dict {
         Element { key, val }
     }
 
-    /// Attempt to encode a key string to a Value. If this Dict uses SharedKeys, and they can be
-    /// found, and the key exists in the shared_keys, the returned value will be a short with the
+    /// Attempt to encode a key string to a `Value`. If this `Dict` uses `SharedKeys`, and they can 
+    /// be found, and the key exists in the shared keys, the returned value will be a short with the
     /// corresponding encoded key.
-    /// Otherwise, the returned Value will be a String containing the input key.
+    /// Otherwise, the returned `Value` will be a String containing the input key.
     fn encode_key(&self, key: &str) -> Option<Box<Value>> {
         if self.uses_shared_keys() {
             let first = unsafe { self._get_unchecked(0).key };
@@ -148,7 +154,7 @@ impl Dict {
 
     fn is_parent_key(value: &Value) -> bool {
         const PARENT_KEY: [u8; 2] = [(crate::value::tag::SHORT << 4) | 0x08, 0];
-        unsafe { value.bytes[..2] == PARENT_KEY }
+        value.bytes[..2] == PARENT_KEY
     }
 }
 

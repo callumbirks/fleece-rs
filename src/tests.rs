@@ -1,9 +1,10 @@
-use super::*;
+use std::sync::Arc;
+
 use crate::encoder::Encoder;
-use crate::scope::Scope;
 use crate::sharedkeys::SharedKeys;
 use crate::value::ValueType;
-use std::sync::Arc;
+
+use super::*;
 
 const PERSON_ENCODED: &[u8] = include_bytes!("../1person.fleece");
 const PEOPLE_ENCODED: &[u8] = include_bytes!("../1000people.fleece");

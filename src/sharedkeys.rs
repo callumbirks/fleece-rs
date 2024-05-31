@@ -1,13 +1,13 @@
-use dashmap::DashMap;
-
-use crate::encoder::Encoder;
-use crate::value::ValueType;
-use crate::Value;
 use std::io::Write;
 use std::pin::Pin;
 use std::ptr::NonNull;
-use std::rc::Rc;
 use std::sync::atomic::{AtomicU16, Ordering};
+
+use dashmap::DashMap;
+
+use crate::encoder::Encoder;
+use crate::Value;
+use crate::value::ValueType;
 
 pub struct SharedKeys {
     map: Pin<Box<DashMap<Box<str>, u16>>>,

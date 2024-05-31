@@ -59,6 +59,11 @@ impl<W: Write> Encoder<W> {
         }
     }
 
+    /// Write the key string to this `Encoder`.
+    /// ## Errors
+    /// - If there is not an open Dict, or the top-level open collection is an Array.
+    /// - If the last item pushed to the Dict was a key (it is waiting for a value).
+    /// - I/O errors related to writing to this Encoder's writer.
     pub fn write_key(&mut self, key: &str) -> Result<()> {
         if let Some(val) = key.to_sized_value() {
             // Keys which are small enough are inlined.
@@ -69,7 +74,11 @@ impl<W: Write> Encoder<W> {
     }
 
     /// Write an [`Encodable`] type to the encoder. The parameter may be any borrowed form of an Encodable type.
-    // `R: Borrow<T>` enables us to pass something like an Rc<T> directly to this function
+    /// `R: Borrow<T>` enables us to pass something like an Rc<T> directly to this function
+    /// ## Errors
+    /// - If there is not an open collection (Array/Dict).
+    /// - If the open collection is a Dict, and it is waiting for a key.
+    /// - I/O Errors related to writing to this Encoder's writer.
     pub fn write_value<R, T>(&mut self, value: &R) -> Result<()>
     where
         R: Borrow<T> + ?Sized,
@@ -92,6 +101,14 @@ impl<W: Write> Encoder<W> {
         }
     }
 
+    /// Write a Fleece `Value` to the Encoder. If the value is an `Array` or `Dict`, all the
+    /// elements will be written as well. This function cannot validate Fleece `Array` or `Dict`,
+    /// so ensure they are valid before passing them to this function.
+    /// ## Errors
+    /// - If there is not an open collection (Array/Dict).
+    /// - If the open collection is a Dict, and it is waiting for a key.
+    /// - If the value is invalid Fleece.
+    /// - I/O errors related to writing to this Encoder's writer.
     pub fn write_fleece(&mut self, value: &value::Value) -> Result<()> {
         // If the encoder has no open collections and the value is not a collection, return None
         if self.collection_stack.empty()
@@ -115,21 +132,26 @@ impl<W: Write> Encoder<W> {
             ValueType::String => self.write_value(value.to_str()),
             ValueType::Data => self.write_value(value.to_data()),
             ValueType::Array => {
-                let value = value.as_array().unwrap();
-                self.begin_array(value.len());
-                for val in value {
+                let Some(array) = value.as_array() else {
+                    unreachable!()
+                };
+                self.begin_array(array.len());
+                for val in array {
                     self.write_fleece(val)?;
                 }
                 self.end_array()
             }
             ValueType::Dict => {
-                let value = value.as_dict().unwrap();
+                let Some(dict) = value.as_dict() else {
+                    unreachable!()
+                };
+                let is_wide = dict.is_wide();
                 self.begin_dict();
-                for elem in value {
+                for elem in dict {
                     let key = if elem.key.value_type() == ValueType::Pointer {
                         unsafe {
                             ValuePointer::from_value(elem.key)
-                                .deref_unchecked(false)
+                                .deref_unchecked(is_wide)
                                 .to_str()
                         }
                     } else {
@@ -150,6 +172,9 @@ impl<W: Write> Encoder<W> {
         self.collection_stack.push_array(capacity);
     }
 
+    /// ## Errors
+    /// - If there is no open collection.
+    /// - If the top open collection is not an Array.
     pub fn end_array(&mut self) -> Result<()> {
         let Some(Collection::Array(mut array)) = self.collection_stack.pop() else {
             return Err(EncodeError::ArrayNotOpen);
@@ -199,6 +224,11 @@ impl<W: Write> Encoder<W> {
         }
     }
 
+    /// End the top open Dict. This will write all the Dict's keys and values to the Encoder's 
+    /// output.
+    /// ## Errors
+    /// - If the top open collection is not a Dict.
+    /// - If the open Dict has a key with no value.
     pub fn end_dict(&mut self) -> Result<()> {
         match self.collection_stack.top() {
             // Can only end a dict if the top collection is a dict
@@ -229,12 +259,16 @@ impl<W: Write> Encoder<W> {
                 DictKey::Inline(val) => self._write(val, is_wide)?,
                 DictKey::Shared(int_key) => {
                     // Unwrap is safe because u16::to_value only fails if > 2047, that's never the case for shared keys
-                    let val = int_key.to_sized_value().unwrap();
+                    let Some(val) = int_key.to_sized_value() else {
+                        unreachable!()
+                    };
                     self._write(&val, is_wide)?
                 }
                 DictKey::Pointer(_, offset) => {
                     if is_wide {
-                        let val = SizedValue::new_pointer(*offset).unwrap();
+                        let Some(val) = SizedValue::new_pointer(*offset) else {
+                            return Err(EncodeError::PointerTooLarge)
+                        };
                         self._write(&val, is_wide)?
                     } else {
                         #[allow(clippy::cast_possible_truncation)]
@@ -274,15 +308,12 @@ where
     Arc<[u8]>: From<W>,
 {
     /// Finish encoding and allocate the result in a new `Scope`. That Scope will hold the
-    /// SharedKeys this encoder held (if any).
+    /// `SharedKeys` this encoder held (if any).
     pub fn finish_scoped(mut self) -> Option<Arc<Scope>> {
         self._end();
         self.out.flush().ok();
         let out = self.out;
-        let shared_keys = match self.shared_keys {
-            None => None,
-            Some(sk) => Some(Arc::new(sk)),
-        };
+        let shared_keys = self.shared_keys.map(Arc::new);
         Scope::new_alloced(out, shared_keys)
     }
 }
@@ -395,7 +426,7 @@ impl<W: Write> Encoder<W> {
         false
     }
 
-    // Only Pointer might take more than 2 bytes, if any do then the whole dict needs to be wide
+    // Only Pointer might require more than 2 bytes, if any do then the whole dict needs to be wide
     fn _dict_should_be_wide(&self, dict: &value_stack::Dict) -> bool {
         let mut len = self.len;
         for elem in &dict.values {

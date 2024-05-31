@@ -18,8 +18,7 @@ pub struct Scope {
 impl Scope {
     pub fn find_shared_keys(containing_data: *const u8) -> Option<Arc<SharedKeys>> {
         Scope::containing(containing_data)
-            .map(|s| s.shared_keys.clone())
-            .flatten()
+            .and_then(|s| s.shared_keys.clone())
     }
 
     /// Create a new scope, which keeps its data allocated.
@@ -79,14 +78,10 @@ impl Scope {
 
     /// Return a `ScopedValue` containing the root Value belonging to this Scope.
     pub fn root(&self) -> Option<ScopedValue> {
-        if let Some(data) = self.data() {
-            Some(ScopedValue {
-                data,
+        self.data().map(|data| ScopedValue {
+            _data: data,
                 value: NonNull::from(unsafe { &*self.root }),
             })
-        } else {
-            None
-        }
     }
 
     pub fn data(&self) -> Option<Arc<[u8]>> {
@@ -103,8 +98,8 @@ impl Scope {
 
     fn root_or_null(data: &[u8]) -> *const Value {
         Value::from_bytes(data).map_or_else(
-            |_| ptr::slice_from_raw_parts(ptr::null::<u8>(), 0) as *const Value,
-            |v| v as *const Value,
+            |_| ptr::slice_from_raw_parts(NonNull::<u8>::dangling().as_ptr(), 0) as *const Value,
+            ptr::from_ref,
         )
     }
 
@@ -129,7 +124,7 @@ impl Scope {
 
 /// Holds a reference to a `Value` and also retains the data which contains the Value.
 pub struct ScopedValue {
-    data: Arc<[u8]>,
+    _data: Arc<[u8]>,
     value: NonNull<Value>,
 }
 
