@@ -8,13 +8,6 @@ use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::ops::Index;
 
-use crate::encoder::AsBoxedValue;
-use crate::scope::Scope;
-use crate::value::Value;
-
-use super::{array, ValueType};
-use super::array::Array;
-
 // A Dict is just an Array, but the elements are alternating key, value
 #[repr(transparent)]
 pub struct Dict {
