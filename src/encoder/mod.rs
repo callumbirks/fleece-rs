@@ -9,6 +9,7 @@ use error::Result;
 use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::io::Write;
+use std::ptr;
 use std::sync::Arc;
 
 mod encodable;
@@ -146,17 +147,27 @@ impl<W: Write> Encoder<W> {
                     unreachable!()
                 };
                 let is_wide = dict.is_wide();
+                let shared_keys = Scope::find_shared_keys(ptr::from_ref(dict) as *const u8);
                 self.begin_dict();
                 for elem in dict {
-                    let key = if elem.key.value_type() == ValueType::Pointer {
-                        unsafe {
+                    let key = match elem.key.value_type() {
+                        ValueType::Pointer => unsafe {
                             ValuePointer::from_value(elem.key)
                                 .deref_unchecked(is_wide)
                                 .to_str()
+                        },
+                        ValueType::Short => {
+                            if let Some(shared_keys) = &shared_keys {
+                                shared_keys.decode(elem.key.to_short() as u16).unwrap_or("")
+                            } else {
+                                ""
+                            }
                         }
-                    } else {
-                        elem.key.to_str()
+                        _ => elem.key.to_str(),
                     };
+                    if key.is_empty() {
+                        return Err(EncodeError::SharedKeysInvalidKey);
+                    }
                     self.write_key(key)?;
                     self.write_fleece(elem.val)?;
                 }
@@ -224,7 +235,7 @@ impl<W: Write> Encoder<W> {
         }
     }
 
-    /// End the top open Dict. This will write all the Dict's keys and values to the Encoder's 
+    /// End the top open Dict. This will write all the Dict's keys and values to the Encoder's
     /// output.
     /// ## Errors
     /// - If the top open collection is not a Dict.
@@ -267,7 +278,7 @@ impl<W: Write> Encoder<W> {
                 DictKey::Pointer(_, offset) => {
                     if is_wide {
                         let Some(val) = SizedValue::new_pointer(*offset) else {
-                            return Err(EncodeError::PointerTooLarge)
+                            return Err(EncodeError::PointerTooLarge);
                         };
                         self._write(&val, is_wide)?
                     } else {

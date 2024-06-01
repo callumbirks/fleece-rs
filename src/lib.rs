@@ -9,6 +9,8 @@ mod value;
 //#[cfg(feature = "serde")]
 
 pub use encoder::Encoder;
+pub use scope::Scope;
+pub use sharedkeys::SharedKeys;
 pub use value::Value;
 
 #[inline]

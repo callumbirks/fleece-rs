@@ -1,18 +1,16 @@
+use std::collections::{BTreeMap, HashMap};
 use std::io::Write;
 use std::pin::Pin;
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicU16, Ordering};
 
-use dashmap::DashMap;
-
 use crate::encoder::Encoder;
-use crate::Value;
 use crate::value::ValueType;
+use crate::Value;
 
 pub struct SharedKeys {
-    map: Pin<Box<DashMap<Box<str>, u16>>>,
-    reverse_map: DashMap<u16, NonNull<Box<str>>>,
-    // `RwLock` allows multi-read and single-write access
+    map: Pin<Box<HashMap<Box<str>, u16>>>,
+    reverse_map: BTreeMap<u16, NonNull<Box<str>>>,
     len: AtomicU16,
 }
 
@@ -22,10 +20,10 @@ impl SharedKeys {
     const MAX_KEY_LENGTH: u16 = 16;
 
     pub fn new() -> Self {
-        let map = Box::pin(DashMap::default());
+        let map = Box::pin(HashMap::default());
         Self {
             map,
-            reverse_map: DashMap::default(),
+            reverse_map: BTreeMap::default(),
             len: AtomicU16::new(0),
         }
     }
@@ -57,8 +55,8 @@ impl SharedKeys {
 
     pub fn write_state(&self, encoder: &mut Encoder<impl Write>) -> Option<()> {
         encoder.begin_array(self.len.load(Ordering::SeqCst) as usize);
-        for entry in self.map.iter() {
-            encoder.write_value::<_, str>(entry.key()).ok()?;
+        for (key, _) in self.map.iter() {
+            encoder.write_value::<_, str>(key).ok()?;
         }
         encoder.end_array().ok()
     }
@@ -69,8 +67,8 @@ impl SharedKeys {
 
     /// Fetch the int key corresponding to the given string key, if it exists
     pub fn encode(&self, string_key: &str) -> Option<u16> {
-        if let Some(entry) = self.map.get(string_key) {
-            return Some(*entry.value());
+        if let Some(value) = self.map.get(string_key) {
+            return Some(*value);
         }
         None
     }
@@ -86,7 +84,7 @@ impl SharedKeys {
     pub fn decode(&self, int_key: u16) -> Option<&str> {
         self.reverse_map
             .get(&int_key)
-            .map(|s| unsafe { s.value().as_ref().as_ref() })
+            .map(|s| unsafe { s.as_ref().as_ref() })
     }
 
     pub fn can_add(&self, key: &str) -> bool {
@@ -96,12 +94,8 @@ impl SharedKeys {
     }
 
     pub fn can_encode(key: &str) -> bool {
-        for c in key.chars() {
-            if !c.is_alphanumeric() && c != '_' && c != '-' {
-                return false;
-            }
-        }
-        true
+        key.chars()
+            .all(|c| c.is_alphanumeric() || c == '_' || c == '-')
     }
 
     fn _insert_owned_key(&mut self, key: &str) -> Option<u16> {
@@ -113,10 +107,9 @@ impl SharedKeys {
         let value = self.len();
         let boxed_key = key.to_string().into_boxed_str();
         self.map.insert(boxed_key, value);
-        let entry_ref = self.map.get(key).unwrap();
+        let entry_ref = self.map.get_key_value(key).unwrap();
         // self.map is inside a PinBox, so this is safe
-        self.reverse_map
-            .insert(value, NonNull::from(entry_ref.key()));
+        self.reverse_map.insert(value, NonNull::from(entry_ref.0));
         self.len.fetch_add(1, Ordering::SeqCst);
         Some(value)
     }
