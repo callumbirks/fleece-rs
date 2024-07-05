@@ -1,6 +1,6 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
-use fleece_rs::Value;
+use fleece_rs::{Encoder, SharedKeys, Value};
 
 const PERSON_ENCODED: &[u8] = include_bytes!("../1person.fleece");
 const PEOPLE_ENCODED: &[u8] = include_bytes!("../1000people.fleece");
@@ -21,5 +21,25 @@ fn decode_people_unchecked(c: &mut Criterion) {
     });
 }
 
-criterion_group!(decode_benches, decode_people, decode_people_unchecked);
+fn decode_people_sharedkeys(c: &mut Criterion) {
+    let value = Value::from_bytes(PEOPLE_ENCODED).unwrap();
+    let mut encoder = Encoder::new();
+    encoder.set_shared_keys(SharedKeys::new());
+    encoder.write_fleece(value).unwrap();
+    let scope = encoder.finish_scoped().unwrap();
+    let data = scope.data().unwrap();
+
+    c.bench_function("decode_people_sharedkeys", |b| {
+        b.iter(|| {
+            let _ = Value::from_bytes(&data);
+        });
+    });
+}
+
+criterion_group!(
+    decode_benches,
+    decode_people,
+    decode_people_unchecked,
+    decode_people_sharedkeys
+);
 criterion_main!(decode_benches);

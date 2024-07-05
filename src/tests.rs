@@ -1,3 +1,4 @@
+use std::fs::{File, OpenOptions};
 use std::sync::Arc;
 
 use crate::encoder::Encoder;
@@ -83,7 +84,7 @@ fn encode_person() {
     let res = encoder.finish();
     let value = Value::from_bytes(&res).unwrap();
 
-    // TODO: assert_eq!(res.len(), PERSON_ENCODED.len(), "Expected encoded value to be the same length!");
+    assert_eq!(res.as_slice(), PERSON_ENCODED);
 
     decode_person_checks(value);
 }
@@ -164,4 +165,24 @@ fn scope_invalid_root() {
     let bytes: Vec<u8> = vec![0x76, 0x61, 0x64, 0x65, 0x72];
     let scope = Scope::new(bytes, None).expect("Failed to create Scope");
     assert!(scope.root().is_none());
+}
+
+#[test]
+fn write_to_file() {
+    let original = Value::from_bytes(PEOPLE_ENCODED).expect("Failed to decode Fleece");
+    let file = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .open("test_1000people.fleece")
+        .expect("Failed to open file");
+    let mut encoder = Encoder::new_to_writer(file);
+    encoder
+        .write_fleece(original)
+        .expect("Failed to write Fleece!");
+    encoder.finish();
+
+    let file_bytes = std::fs::read("test_1000people.fleece").expect("Failed to read file");
+    let result = Value::from_bytes(&file_bytes).expect("Failed to decode value");
+    decode_people_checks(result);
+    std::fs::remove_file("test_1000people.fleece").ok();
 }

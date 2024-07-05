@@ -168,6 +168,69 @@ impl Value {
     pub fn value_type(&self) -> ValueType {
         ValueType::from_byte(self.bytes[0])
     }
+
+    pub fn annotate(&self, data: &[u8]) -> String {
+        let self_offset = self.bytes.as_ptr() as usize - data.as_ptr() as usize;
+        let self_range = self_offset..(self_offset + self.required_size());
+        let mut output = String::new();
+        output.push_str(&format!("{:?} = ", &data[self_range]));
+        if self.bytes.is_empty() {
+            return "Empty".to_string();
+        }
+        match self.value_type() {
+            ValueType::Null => output.push_str("Null"),
+            ValueType::Undefined => output.push_str("Undefined"),
+            ValueType::False => output.push_str("False"),
+            ValueType::True => output.push_str("True"),
+            ValueType::Short => output.push_str(&format!("{:?}", self.to_short())),
+            ValueType::UnsignedInt => output.push_str(&format!("{:?}", self.to_unsigned_int())),
+            ValueType::Int => output.push_str(&format!("{:?}", self.to_int())),
+            ValueType::Float | ValueType::Double32 | ValueType::Double64 => {
+                output.push_str(&format!("{:?}", self.to_float()))
+            }
+            ValueType::String => output.push_str(&format!("{:?}", self.to_str())),
+            ValueType::Data => output.push_str(&format!("{:?}", self.to_data())),
+            ValueType::Array => {
+                let array = self.as_array().unwrap();
+                let mut string = "Array [".to_string();
+                for (i, val) in array.into_iter().enumerate() {
+                    string.push_str(&val.annotate(data));
+                    if i < array.len() - 1 {
+                        string.push_str(", ");
+                    }
+                }
+                string.push(']');
+                output.push_str(&string);
+            }
+            ValueType::Dict => {
+                let dict = self.as_dict().unwrap();
+                let mut string = "Dict {".to_string();
+                for (i, elem) in dict.into_iter().enumerate() {
+                    string.push_str(&elem.key.annotate(data));
+                    string.push_str(", ");
+                    string.push_str(&elem.val.annotate(data));
+                    if i < dict.len() - 1 {
+                        string.push_str(", ");
+                    }
+                }
+                string.push('}');
+                output.push_str(&string);
+            }
+            ValueType::Pointer => {
+                let pointer = Pointer::from_value(self);
+                let narrow_offset = unsafe { pointer.get_offset(false) };
+                let wide_offset = if self.len() >= 4 {
+                    unsafe { pointer.get_offset(true) }
+                } else {
+                    0
+                };
+                output.push_str(&format!(
+                    "Pointer {{ if narrow: -{narrow_offset}, if wide: -{wide_offset} }}"
+                ))
+            }
+        };
+        output
+    }
 }
 
 // Into Conversions

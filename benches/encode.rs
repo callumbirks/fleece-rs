@@ -10,6 +10,7 @@ fn encode_people(c: &mut Criterion) {
         b.iter(|| {
             let mut encoder = Encoder::new();
             encoder.write_fleece(value).unwrap();
+            let _ = encoder.finish();
         });
     });
 }
@@ -21,6 +22,7 @@ fn encode_people_sharedkeys(c: &mut Criterion) {
             let mut encoder = Encoder::new();
             encoder.set_shared_keys(SharedKeys::new());
             encoder.write_fleece(value).unwrap();
+            let _ = encoder.finish_scoped();
         });
     });
 }
