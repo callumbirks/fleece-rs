@@ -150,7 +150,9 @@ fn encode_people_shared_keys() {
     let original = Value::from_bytes(PEOPLE_ENCODED).expect("Failed to decode Fleece");
     let mut encoder = Encoder::new();
     encoder.set_shared_keys(SharedKeys::new());
-    encoder.write_fleece(original).expect("Failed to write value!");
+    encoder
+        .write_fleece(original)
+        .expect("Failed to write value!");
     let res = encoder.finish_scoped().expect("Failed to create Scope!");
     let scoped_value = res.root().expect("Scope has no root!");
     decode_people_checks(scoped_value.value());
@@ -158,8 +160,8 @@ fn encode_people_shared_keys() {
 
 #[test]
 fn scope_invalid_root() {
-    // Some bytes which are invalid Fleece
+    // Some bytes which are not valid Fleece
     let bytes: Vec<u8> = vec![0x76, 0x61, 0x64, 0x65, 0x72];
-    let scope = Scope::new_alloced(bytes, None).expect("Failed to create Scope");
+    let scope = Scope::new(bytes, None).expect("Failed to create Scope");
     assert!(scope.root().is_none());
 }

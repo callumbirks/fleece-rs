@@ -325,7 +325,7 @@ where
         self.out.flush().ok();
         let out = self.out;
         let shared_keys = self.shared_keys.map(Arc::new);
-        Scope::new_alloced(out, shared_keys)
+        Scope::new(out, shared_keys)
     }
 }
 

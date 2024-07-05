@@ -1,5 +1,4 @@
 use std::ops::Deref;
-use std::ptr;
 use std::ptr::NonNull;
 use std::sync::{atomic::AtomicBool, Arc, OnceLock, RwLock, Weak};
 
@@ -11,17 +10,18 @@ pub struct Scope {
     pub shared_keys: Option<Arc<SharedKeys>>,
     weak_data: Weak<[u8]>,
     strong_data: Option<Arc<[u8]>>,
-    root: *const Value,
+    root: Option<NonNull<Value>>,
     registered: AtomicBool,
 }
 
 impl Scope {
+    #[must_use]
     pub fn find_shared_keys(containing_data: *const u8) -> Option<Arc<SharedKeys>> {
         Scope::containing(containing_data).and_then(|s| s.shared_keys.clone())
     }
 
     /// Create a new scope, which keeps its data allocated.
-    pub fn new_alloced(
+    pub fn new(
         data: impl Into<Arc<[u8]>>,
         shared_keys: Option<Arc<SharedKeys>>,
     ) -> Option<Arc<Self>> {
@@ -34,7 +34,7 @@ impl Scope {
         let start = strong_data.as_ptr() as usize;
         let end = strong_data.as_ptr() as usize + strong_data.len();
 
-        let root = Self::root_or_null(&strong_data);
+        let root = Self::root_or_none(&strong_data);
 
         let scope = Arc::new(Scope {
             shared_keys,
@@ -51,6 +51,7 @@ impl Scope {
     }
 
     /// Create a new Scope, which does not keep its data allocated.
+    #[must_use]
     pub fn new_weak(data: Weak<[u8]>, shared_keys: Option<Arc<SharedKeys>>) -> Option<Arc<Self>> {
         let scope_map = Self::scope_map();
         let mut scope_map = scope_map.write().ok()?;
@@ -60,7 +61,7 @@ impl Scope {
         let start = strong_data.as_ptr() as usize;
         let end = strong_data.as_ptr() as usize + strong_data.len();
 
-        let root = Self::root_or_null(&strong_data);
+        let root = Self::root_or_none(&strong_data);
 
         let scope = Arc::new(Scope {
             shared_keys,
@@ -78,14 +79,10 @@ impl Scope {
     /// Return a `ScopedValue` containing the root Value belonging to this Scope.
     pub fn root(&self) -> Option<ScopedValue> {
         self.data().and_then(|data| {
-            if self.root.is_null() {
-                None
-            } else {
-                Some(ScopedValue {
-                    _data: data,
-                    value: NonNull::from(unsafe { &*self.root }),
-                })
-            }
+            self.root.map(|root| ScopedValue {
+                _data: data,
+                value: root,
+            })
         })
     }
 
@@ -101,11 +98,8 @@ impl Scope {
         SCOPE_MAP.get_or_init(|| RwLock::new(RangeMap::new()))
     }
 
-    fn root_or_null(data: &[u8]) -> *const Value {
-        Value::from_bytes(data).map_or_else(
-            |_| ptr::slice_from_raw_parts(NonNull::<u8>::dangling().as_ptr(), 0) as *const Value,
-            ptr::from_ref,
-        )
+    fn root_or_none(data: &[u8]) -> Option<NonNull<Value>> {
+        Value::from_bytes(data).map(NonNull::from).ok()
     }
 
     fn containing(data: *const u8) -> Option<Arc<Scope>> {
