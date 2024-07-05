@@ -156,3 +156,10 @@ fn encode_people_shared_keys() {
     decode_people_checks(scoped_value.value());
 }
 
+#[test]
+fn scope_invalid_root() {
+    // Some bytes which are invalid Fleece
+    let bytes: Vec<u8> = vec![0x76, 0x61, 0x64, 0x65, 0x72];
+    let scope = Scope::new_alloced(bytes, None).expect("Failed to create Scope");
+    assert!(scope.root().is_none());
+}

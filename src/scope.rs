@@ -9,16 +9,15 @@ use crate::{sharedkeys::SharedKeys, Value};
 
 pub struct Scope {
     pub shared_keys: Option<Arc<SharedKeys>>,
-    pub data: Weak<[u8]>,
-    pub alloced_data: Option<Arc<[u8]>>,
+    weak_data: Weak<[u8]>,
+    strong_data: Option<Arc<[u8]>>,
     root: *const Value,
     registered: AtomicBool,
 }
 
 impl Scope {
     pub fn find_shared_keys(containing_data: *const u8) -> Option<Arc<SharedKeys>> {
-        Scope::containing(containing_data)
-            .and_then(|s| s.shared_keys.clone())
+        Scope::containing(containing_data).and_then(|s| s.shared_keys.clone())
     }
 
     /// Create a new scope, which keeps its data allocated.
@@ -29,18 +28,18 @@ impl Scope {
         let scope_map = Self::scope_map();
         let mut scope_map = scope_map.write().ok()?;
 
-        let alloced_data = data.into();
-        let data = Arc::downgrade(&alloced_data);
+        let strong_data = data.into();
+        let data = Arc::downgrade(&strong_data);
 
-        let start = alloced_data.as_ptr() as usize;
-        let end = alloced_data.as_ptr() as usize + alloced_data.len();
+        let start = strong_data.as_ptr() as usize;
+        let end = strong_data.as_ptr() as usize + strong_data.len();
 
-        let root = Self::root_or_null(&alloced_data);
+        let root = Self::root_or_null(&strong_data);
 
         let scope = Arc::new(Scope {
             shared_keys,
-            data,
-            alloced_data: Some(alloced_data),
+            weak_data: data,
+            strong_data: Some(strong_data),
             root,
             registered: AtomicBool::new(true),
         });
@@ -56,17 +55,17 @@ impl Scope {
         let scope_map = Self::scope_map();
         let mut scope_map = scope_map.write().ok()?;
 
-        let alloced_data = data.upgrade()?;
+        let strong_data = data.upgrade()?;
 
-        let start = alloced_data.as_ptr() as usize;
-        let end = alloced_data.as_ptr() as usize + alloced_data.len();
+        let start = strong_data.as_ptr() as usize;
+        let end = strong_data.as_ptr() as usize + strong_data.len();
 
-        let root = Self::root_or_null(&alloced_data);
+        let root = Self::root_or_null(&strong_data);
 
         let scope = Arc::new(Scope {
             shared_keys,
-            data,
-            alloced_data: None,
+            weak_data: data,
+            strong_data: None,
             root,
             registered: AtomicBool::new(true),
         });
@@ -78,17 +77,23 @@ impl Scope {
 
     /// Return a `ScopedValue` containing the root Value belonging to this Scope.
     pub fn root(&self) -> Option<ScopedValue> {
-        self.data().map(|data| ScopedValue {
-            _data: data,
-                value: NonNull::from(unsafe { &*self.root }),
-            })
+        self.data().and_then(|data| {
+            if self.root.is_null() {
+                None
+            } else {
+                Some(ScopedValue {
+                    _data: data,
+                    value: NonNull::from(unsafe { &*self.root }),
+                })
+            }
+        })
     }
 
     pub fn data(&self) -> Option<Arc<[u8]>> {
-        if let Some(alloced_data) = &self.alloced_data {
+        if let Some(alloced_data) = &self.strong_data {
             Some(alloced_data.clone())
         } else {
-            self.data.upgrade()
+            self.weak_data.upgrade()
         }
     }
 
@@ -130,18 +135,16 @@ pub struct ScopedValue {
 
 impl ScopedValue {
     pub fn value(&self) -> &Value {
-        unsafe {
-            self.value.as_ref()
-        }
+        unsafe { self.value.as_ref() }
     }
 }
 
 impl PartialEq for Scope {
     fn eq(&self, other: &Self) -> bool {
-        let Some(self_data) = self.data.upgrade() else {
+        let Some(self_data) = self.weak_data.upgrade() else {
             return false;
         };
-        let Some(other_data) = other.data.upgrade() else {
+        let Some(other_data) = other.weak_data.upgrade() else {
             return false;
         };
         self_data.as_ptr().eq(&other_data.as_ptr())
