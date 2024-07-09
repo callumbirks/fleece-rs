@@ -77,6 +77,35 @@ impl Encodable for u64 {
     }
 }
 
+impl Encodable for i32 {
+    fn write_fleece_to<W: Write>(&self, writer: &mut W, is_wide: bool) -> Result<usize> {
+        i64::from(*self).write_fleece_to(writer, is_wide)
+    }
+
+    fn fleece_size(&self) -> usize {
+        i64::from(*self).fleece_size()
+    }
+
+    fn to_sized_value(&self) -> Option<SizedValue> {
+        i64::from(*self).to_sized_value()
+    }
+}
+
+impl Encodable for u32 {
+    fn write_fleece_to<W: Write>(&self, writer: &mut W, is_wide: bool) -> Result<usize> {
+        u64::from(*self).write_fleece_to(writer, is_wide)
+    }
+
+    fn fleece_size(&self) -> usize {
+        u64::from(*self).fleece_size()
+    }
+
+    fn to_sized_value(&self) -> Option<SizedValue> {
+        u64::from(*self).to_sized_value()
+    }
+}
+
+
 impl Encodable for u16 {
     fn write_fleece_to<W: Write>(&self, writer: &mut W, is_wide: bool) -> Result<usize> {
         // Short can only be 12 bits
@@ -297,7 +326,7 @@ impl Encodable for [u8] {
         match self.len() {
             0 | 1 => 2,
             2..=0x0E => 1 + self.len(),
-            _ => 1 + varint::size_required(self.len()) + self.len(),
+            _ => 1 + varint::size_required(self.len() as u64) + self.len(),
         }
     }
 

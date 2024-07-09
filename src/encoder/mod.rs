@@ -1,4 +1,3 @@
-use crate::encoder::error::EncodeError;
 use crate::encoder::value_stack::{Collection, CollectionStack, DictKey};
 use crate::sharedkeys::SharedKeys;
 use crate::value;
@@ -18,6 +17,7 @@ mod value_stack;
 
 use crate::scope::Scope;
 pub use encodable::AsBoxedValue;
+pub use error::EncodeError;
 
 struct NullValue;
 struct UndefinedValue;
@@ -41,6 +41,7 @@ pub struct Encoder<W: Write> {
     shared_keys: Option<SharedKeys>,
     collection_stack: CollectionStack,
     len: usize,
+    top_collection_closed: bool,
 }
 
 impl Encoder<Vec<u8>> {
@@ -57,6 +58,7 @@ impl<W: Write> Encoder<W> {
             shared_keys: None,
             collection_stack: CollectionStack::new(),
             len: 0,
+            top_collection_closed: false,
         }
     }
 
@@ -97,7 +99,7 @@ impl<W: Write> Encoder<W> {
             // Otherwise, write it to output and push a pointer to it onto the current collection
             let offset = self._write(value, false)?;
             let pointer =
-                SizedValue::new_pointer(offset).ok_or_else(|| EncodeError::PointerTooLarge)?;
+                SizedValue::new_temp_pointer(offset).ok_or_else(|| EncodeError::PointerTooLarge)?;
             self._push(pointer)
         }
     }
@@ -136,7 +138,7 @@ impl<W: Write> Encoder<W> {
                 let Some(array) = value.as_array() else {
                     unreachable!()
                 };
-                self.begin_array(array.len());
+                self.begin_array(array.len())?;
                 for val in array {
                     self.write_fleece(val)?;
                 }
@@ -179,8 +181,11 @@ impl<W: Write> Encoder<W> {
         }
     }
 
-    pub fn begin_array(&mut self, capacity: usize) {
-        self.collection_stack.push_array(capacity);
+    pub fn begin_array(&mut self, capacity: usize) -> Result<()> {
+        if self.top_collection_closed {
+            return Err(EncodeError::MultiTopLevelCollection);
+        }
+        self.collection_stack.push_array(capacity)
     }
 
     /// ## Errors
@@ -190,7 +195,7 @@ impl<W: Write> Encoder<W> {
         let Some(Collection::Array(mut array)) = self.collection_stack.pop() else {
             return Err(EncodeError::ArrayNotOpen);
         };
-        let is_wide = Encoder::<W>::_array_should_be_wide(&array);
+        let is_wide = self._array_should_be_wide(&array);
 
         // Write the Array header via `Encodable` trait
         let offset = self._write(&array, is_wide)?;
@@ -277,13 +282,15 @@ impl<W: Write> Encoder<W> {
                 }
                 DictKey::Pointer(_, offset) => {
                     if is_wide {
-                        let Some(val) = SizedValue::new_pointer(*offset) else {
+                        let Some(val) = SizedValue::new_wide_pointer(*offset) else {
                             return Err(EncodeError::PointerTooLarge);
                         };
                         self._write(&val, is_wide)?
                     } else {
                         #[allow(clippy::cast_possible_truncation)]
-                        let val = SizedValue::new_narrow_pointer(*offset as u16);
+                        let Some(val) = SizedValue::new_narrow_pointer(*offset as u16) else {
+                            return Err(EncodeError::PointerTooLarge);
+                        };
                         self._write(&val, is_wide)?
                     }
                 }
@@ -398,15 +405,13 @@ impl<W: Write> Encoder<W> {
         match self
             .collection_stack
             .top_mut()
-            .ok_or_else(|| EncodeError::CollectionNotOpen)?
+            .ok_or(EncodeError::CollectionNotOpen)?
         {
             Collection::Array(arr) => {
                 arr.push(value);
                 Ok(())
             }
-            Collection::Dict(dict) => dict
-                .push_value(value)
-                .ok_or_else(|| EncodeError::DictWaitingForKey),
+            Collection::Dict(dict) => dict.push_value(value).ok_or(EncodeError::DictWaitingForKey),
         }
     }
 
@@ -428,9 +433,11 @@ impl<W: Write> Encoder<W> {
         self.len as u32 - offset_from_start
     }
 
-    fn _array_should_be_wide(array: &value_stack::Array) -> bool {
+    fn _array_should_be_wide(&self, array: &value_stack::Array) -> bool {
         for v in &array.values {
-            if v.is_wide() {
+            if v.value_type() == ValueType::Pointer
+                && v.actual_offset(self.len) > u32::from(pointer::MAX_NARROW)
+            {
                 return true;
             }
         }
@@ -447,7 +454,9 @@ impl<W: Write> Encoder<W> {
                     return true;
                 }
             }
-            if elem.val.value_type() == ValueType::Pointer && elem.val.is_wide() {
+            if elem.val.value_type() == ValueType::Pointer
+                && elem.val.actual_offset(self.len) > u32::from(pointer::MAX_NARROW)
+            {
                 return true;
             }
             len += 2;
@@ -483,46 +492,55 @@ impl<W: Write> Encoder<W> {
     }
 
     #[allow(clippy::cast_possible_truncation)]
-    fn _fix_pointer(pointer: &SizedValue, len: u32, is_wide: bool) -> SizedValue {
+    fn _fix_pointer(temp_pointer: &SizedValue, len: u32, is_wide: bool) -> SizedValue {
         // Make sure pointers don't get truncated
-        let pointer = if is_wide {
-            pointer.clone()
+        let pointer = if temp_pointer.is_wide() {
+            temp_pointer.clone()
         } else {
-            pointer.narrow_pointer()
+            temp_pointer.narrow_pointer()
         };
 
         let pointer = ValuePointer::from_value(pointer.as_value());
 
-        let offset_from_start = unsafe { pointer.get_offset(is_wide) } as u32;
+        let offset_from_start = unsafe { pointer.get_offset(temp_pointer.is_wide()) } as u32;
         let offset = len - offset_from_start;
         if is_wide {
-            SizedValue::new_pointer(offset).unwrap()
+            SizedValue::new_wide_pointer(offset).expect("Pointer unexpectedly large")
         } else {
-            SizedValue::new_narrow_pointer(offset as u16)
+            SizedValue::new_narrow_pointer(offset as u16).expect("Pointer unexpectedly large")
         }
     }
 
-    fn _finished_collection(&mut self, offset_from_start: u32) {
+    fn _finished_collection(&mut self, offset_from_start: u32) -> Result<()> {
         if let Some(collection) = self.collection_stack.top_mut() {
+            let pointer = SizedValue::new_temp_pointer(offset_from_start)
+                .ok_or(EncodeError::PointerTooLarge)?;
             match collection {
                 Collection::Dict(dict) => {
-                    let pointer = SizedValue::new_pointer(offset_from_start).unwrap();
                     dict.push_value(pointer);
                 }
                 Collection::Array(array) => {
-                    let pointer = SizedValue::new_pointer(offset_from_start).unwrap();
                     array.push(pointer);
                 }
             }
         } else {
             // The last collection is finished, write the root value at the end.
             // This root value points to the outermost collection.
+            let offset = self._actual_pointer_offset(offset_from_start);
             #[allow(clippy::cast_possible_truncation)]
-            let root = SizedValue::new_narrow_pointer(
-                self._actual_pointer_offset(offset_from_start) as u16,
-            );
-            self._write(&root, false)
-                .expect("IO Error while attempting to write root value");
+            let root = if offset <= pointer::MAX_NARROW as u32 {
+                SizedValue::new_narrow_pointer(offset as u16)
+            } else {
+                // The root value must be 2 bytes, so if the pointer to the top-level collection
+                // is 4 bytes wide, we need to write that, then write another 2-byte pointer to that
+                let inner_root =
+                    SizedValue::new_temp_pointer(offset).ok_or(EncodeError::PointerTooLarge)?;
+                self._write(&inner_root, true)?;
+                SizedValue::new_narrow_pointer(4)
+            };
+            self._write(&root, false)?;
+            self.top_collection_closed = true;
         }
+        Ok(())
     }
 }

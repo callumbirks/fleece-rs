@@ -1,16 +1,19 @@
 pub const MAX_LEN: usize = 10;
 
+// TODO: The varint this produces is not portable between different-endianness machines
+
 pub fn read(data: &[u8]) -> (usize, u64) {
-    if data.len() < 2 {
-        return (0, 0);
+    if data.is_empty() {
+        return (0, 0)
     }
-    if data.len() == 2 {
-        return (1, u64::from(data[1]));
+    if data[0] < 0x80 {
+        return (1, u64::from(data[0]));
     }
 
-    let mut shift = 0;
-    let mut res = 0_u64;
+    let mut shift: usize = 7;
+    let mut res = u64::from(data[0] & 0x7F);
     let end: usize = data.len().min(MAX_LEN + 1);
+    
     for (i, byte) in data[1..end].iter().enumerate() {
         if *byte >= 0x80 {
             res |= u64::from(*byte & 0x7F) << shift;
@@ -21,9 +24,11 @@ pub fn read(data: &[u8]) -> (usize, u64) {
             if i == MAX_LEN && *byte > 1 {
                 return (0, 0);
             }
-            return (i + 1, res);
+            log::trace!("Read varint {} from {:?}", res, &data[..(i + 2)]);
+            return (i + 2, res);
         }
     }
+
     (0, 0)
 }
 
@@ -41,7 +46,7 @@ pub fn write(out: &mut [u8], value: u64) -> usize {
 }
 
 // The number of bytes required to write a varint with the given value
-pub fn size_required(value: usize) -> usize {
+pub fn size_required(value: u64) -> usize {
     if value == 0 {
         1
     } else {

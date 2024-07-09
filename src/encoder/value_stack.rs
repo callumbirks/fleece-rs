@@ -1,3 +1,4 @@
+use crate::encoder::error::EncodeError;
 use crate::value::sized::SizedValue;
 
 #[derive(Default)]
@@ -50,23 +51,27 @@ impl CollectionStack {
         self.collections.is_empty()
     }
 
-    pub fn push_array(&mut self, capacity: usize) -> Option<()> {
+    pub fn push_array(&mut self, capacity: usize) -> crate::encoder::Result<()> {
         if let Some(Collection::Dict(dict)) = self.top() {
             // If the current collection is a dict it should have a key to correspond to this array
-            dict.next_key.as_ref()?;
+            if dict.next_key.is_none() {
+                return Err(EncodeError::DictWaitingForKey);
+            }
         }
         self.collections
             .push(Collection::Array(Array::with_capacity(capacity)));
-        Some(())
+        Ok(())
     }
 
-    pub fn push_dict(&mut self) -> Option<()> {
+    pub fn push_dict(&mut self) -> crate::encoder::Result<()> {
         if let Some(Collection::Dict(dict)) = self.top() {
             // If the current collection is a dict it should have a key to correspond to this dict
-            dict.next_key.as_ref()?;
+            if dict.next_key.is_none() {
+                return Err(EncodeError::DictWaitingForKey);
+            }
         }
         self.collections.push(Collection::Dict(Dict::new()));
-        Some(())
+        Ok(())
     }
 
     pub fn pop(&mut self) -> Option<Collection> {

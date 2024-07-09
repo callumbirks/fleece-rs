@@ -1,9 +1,10 @@
+use log::LevelFilter;
 use std::fs::{File, OpenOptions};
 use std::sync::Arc;
 
 use crate::encoder::Encoder;
 use crate::sharedkeys::SharedKeys;
-use crate::value::ValueType;
+use crate::value::{varint, ValueType};
 
 use super::*;
 
@@ -64,6 +65,23 @@ fn decode_people_checks(people: &Value) {
             "Expected index to be the same as the array index!"
         );
     }
+}
+
+fn varint_test(val: u64) {
+    let size_required = varint::size_required(val);
+    let mut buf: Vec<u8> = vec![0; size_required];
+    let _written = varint::write(&mut buf, val);
+    println!("Wrote varint {:02x?}", &buf);
+    let (_read, out_val) = varint::read(&buf);
+    assert_eq!(val, out_val);
+}
+
+#[test]
+fn varint() {
+    varint_test(8_704_268);
+    varint_test(100_000);
+    varint_test(603);
+    varint_test(87);
 }
 
 #[test]
@@ -185,4 +203,71 @@ fn write_to_file() {
     let result = Value::from_bytes(&file_bytes).expect("Failed to decode value");
     decode_people_checks(result);
     std::fs::remove_file("test_1000people.fleece").ok();
+}
+
+#[test]
+fn encoder_multiple_top_level_collections() {
+    let mut encoder = Encoder::new();
+    encoder.begin_array(1).unwrap();
+    encoder.write_value(&42).unwrap();
+    encoder.end_array().unwrap();
+    assert!(matches!(
+        encoder.begin_array(1),
+        Err(encoder::EncodeError::MultiTopLevelCollection)
+    ));
+}
+
+fn write_10_000() {
+    env_logger::builder()
+        .filter_level(LevelFilter::Debug)
+        .init();
+    let original = Value::from_bytes(PEOPLE_ENCODED).unwrap();
+    let file = OpenOptions::new()
+        .write(true)
+        .truncate(true)
+        .create(true)
+        .open("10_000people.fleece")
+        .unwrap();
+    let mut encoder = Encoder::new_to_writer(file);
+    let array = original.as_array().unwrap();
+    encoder.begin_array(10_000).unwrap();
+    for _ in 0..10 {
+        for value in array {
+            encoder.write_fleece(value).unwrap();
+        }
+    }
+    encoder.end_array().unwrap();
+    encoder.finish();
+}
+
+// A larger read/write test which should catch any bugs related to wide arrays / pointers.
+#[test]
+fn decode_10_000() {
+    write_10_000();
+    let bytes = std::fs::read("10_000people.fleece").expect("Failed to read file");
+    let value = Value::from_bytes(&bytes).expect("Failed to parse Value from bytes");
+    assert_eq!(value.value_type(), ValueType::Array);
+    let array = value.as_array().unwrap();
+    assert_eq!(array.len(), 1000 * 10);
+    
+    for person in array {
+        let person = person.as_dict().expect("Expected Person to be a Dict!");
+        assert_eq!(person.len(), 21, "Expected Person to have 21 keys!");
+        let id = person
+            .get("_id")
+            .expect("Expected Person to have key '_id'!");
+        assert_eq!(
+            id.value_type(),
+            ValueType::String,
+            "Expected _id to be a String!"
+        );
+        let age = person
+            .get("age")
+            .expect("Expected Person to have key 'age'!");
+        assert_eq!(
+            age.value_type(),
+            ValueType::Short,
+            "Expected age to be a Short!"
+        );
+    }
 }

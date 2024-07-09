@@ -23,4 +23,6 @@ pub enum EncodeError {
     },
     #[error("Value Pointer too large to be encoded")]
     PointerTooLarge,
+    #[error("Multiple top level collections are not allowed")]
+    MultiTopLevelCollection,
 }

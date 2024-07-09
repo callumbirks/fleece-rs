@@ -226,7 +226,7 @@ impl Value {
                 };
                 output.push_str(&format!(
                     "Pointer {{ if narrow: -{narrow_offset}, if wide: -{wide_offset} }}"
-                ))
+                ));
             }
         };
         output
@@ -383,7 +383,7 @@ impl Value {
 
     pub(super) fn _validate<const IS_ARR_ELEM: bool>(
         &self,
-        wide: bool,
+        is_wide: bool,
         data_start: *const u8,
         data_end: *const u8,
     ) -> Result<()> {
@@ -392,8 +392,8 @@ impl Value {
                 array::Array::from_value(self).validate(data_start, data_end)
             }
             ValueType::Pointer => {
-                let target = Pointer::from_value(self).deref_checked(wide, data_start)?;
-                target._validate::<false>(wide, data_start, self.bytes.as_ptr())
+                let target = Pointer::from_value(self).deref_checked(is_wide, data_start)?;
+                target._validate::<false>(is_wide, data_start, self.bytes.as_ptr())
             }
             _ => {
                 // We don't need to validate that array elements fit within the data, as
@@ -406,7 +406,7 @@ impl Value {
                     Ok(())
                 } else {
                     Err(DecodeError::ValueOutOfBounds {
-                        value: self.clone_box(),
+                        value_type: self.value_type(),
                         required_size: self.required_size(),
                         available_size: data_end as usize - self.bytes.as_ptr() as usize,
                     })
@@ -416,7 +416,7 @@ impl Value {
     }
 
     // The number of bytes required to hold this value
-    // For Dict and Array, this does not include the size of inline values, only the header
+    // For Dict and Array, this does not include the size of elements, only the header
     #[allow(clippy::match_same_arms)]
     #[must_use]
     pub fn required_size(&self) -> usize {
@@ -509,7 +509,7 @@ impl Value {
         };
         if unlikely(target.len() < 2 || target.required_size() > available_size) {
             Err(DecodeError::ValueOutOfBounds {
-                value: target.clone_box(),
+                value_type: target.value_type(),
                 required_size: target.required_size(),
                 available_size,
             })
@@ -553,13 +553,13 @@ impl Value {
     }
 
     fn _get_data(&self) -> &[u8] {
-        if unlikely(self.bytes.is_empty()) {
+        if unlikely(self.bytes.len() < 2) {
             return &[];
         }
         let inline_size = self.bytes[0] & 0x0F;
         if inline_size == 0x0F {
             // varint
-            let (bytes_read, size) = varint::read(&self.bytes);
+            let (bytes_read, size) = varint::read(&self.bytes[1..]);
             if bytes_read == 0 {
                 return &[];
             }
@@ -592,41 +592,29 @@ impl Debug for Value {
         if self.bytes.is_empty() {
             return write!(f, "Empty");
         }
+        let mut out = f.debug_struct("Value");
+        out.field("type", &self.value_type());
         match self.value_type() {
-            ValueType::Null => write!(f, "Null"),
-            ValueType::Undefined => write!(f, "Undefined"),
-            ValueType::False => write!(f, "False"),
-            ValueType::True => write!(f, "True"),
-            ValueType::Short => self.to_short().fmt(f),
-            ValueType::UnsignedInt => self.to_unsigned_int().fmt(f),
-            ValueType::Int => self.to_int().fmt(f),
-            ValueType::Float | ValueType::Double32 | ValueType::Double64 => self.to_float().fmt(f),
-            ValueType::String => self.to_str().fmt(f),
-            ValueType::Data => self.to_data().fmt(f),
-            ValueType::Array => {
-                let array = self.as_array().unwrap();
-                let mut string = "Array [".to_string();
-                for (i, val) in array.into_iter().enumerate() {
-                    string.push_str(&format!("{val:?}"));
-                    if i < array.len() - 1 {
-                        string.push_str(", ");
-                    }
-                }
-                string.push(']');
-                write!(f, "{string}")
+            ValueType::Null => out.field("val", &"Null"),
+            ValueType::Undefined => out.field("val", &"Undefined"),
+            ValueType::False => out.field("val", &"False"),
+            ValueType::True => out.field("val", &"True"),
+            ValueType::Short => out.field("val", &self.to_short()),
+            ValueType::UnsignedInt => out.field("val", &self.to_unsigned_int()),
+            ValueType::Int => out.field("val", &self.to_int()),
+            ValueType::Float | ValueType::Double32 | ValueType::Double64 => {
+                out.field("val", &self.to_double())
             }
-            ValueType::Dict => {
-                let dict = self.as_dict().unwrap();
-                let mut string = "Dict {".to_string();
-                for (i, elem) in dict.into_iter().enumerate() {
-                    string.push_str(&format!("{:?} : {:?}", elem.key, elem.val));
-                    if i < dict.len() - 1 {
-                        string.push_str(", ");
-                    }
-                }
-                string.push('}');
-                write!(f, "{string}")
-            }
+            ValueType::String => out.field("val", &self.to_str()),
+            ValueType::Data => out.field("val", &self.to_data()),
+            ValueType::Array => out.field(
+                "val",
+                &format!("len: {}", self.as_array().map_or(0, array::Array::len)),
+            ),
+            ValueType::Dict => out.field(
+                "val",
+                &format!("len: {}", self.as_dict().map_or(0, dict::Dict::len)),
+            ),
             ValueType::Pointer => {
                 let pointer = Pointer::from_value(self);
                 let narrow_offset = unsafe { pointer.get_offset(false) };
@@ -635,12 +623,13 @@ impl Debug for Value {
                 } else {
                     0
                 };
-                write!(
-                    f,
-                    "Pointer {{ if narrow: -{narrow_offset}, if wide: -{wide_offset} }}"
+                out.field(
+                    "val",
+                    &format!("Pointer {{ if narrow: -{narrow_offset}, if wide: -{wide_offset} }}"),
                 )
             }
-        }
+        };
+        out.finish()
     }
 }
 

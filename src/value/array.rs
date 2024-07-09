@@ -36,6 +36,7 @@ impl Array {
         let offset = index * width as usize;
         #[allow(clippy::cast_possible_wrap)]
         let first_pos = self.first_pos();
+        log::trace!("Array/Dict first pos: {first_pos}");
         #[allow(clippy::cast_possible_wrap)]
         let target = self.value._offset_unchecked((first_pos + offset) as isize, width);
         if target.value_type() == ValueType::Pointer {
@@ -53,7 +54,13 @@ impl Array {
 
         if unlikely(size == VARINT_COUNT) {
             let (read, _) = varint::read(&self.value.bytes[2..]);
-            2 + read
+            // First pos is 2 + varint len
+            if read % 2 != 0 {
+                // + 1 again if varint len is odd, because all values are 2-byte aligned.
+                2 + read + 1
+            } else {
+                2 + read
+            }
         } else {
             2
         }
@@ -79,6 +86,8 @@ impl Array {
             #[allow(clippy::cast_possible_truncation)]
             if read == 0 {
                 0
+            } else if self.value.value_type() == ValueType::Dict {
+                size as usize * 2
             } else {
                 size as usize
             }
@@ -114,10 +123,12 @@ impl Array {
 
         let first = unsafe { self.value.bytes.as_ptr().add(self.first_pos()) };
         if unlikely((first as usize) + (elem_count * width) > (data_end as usize)) {
+            let available_size = data_end as usize - first as usize;
             return Err(DecodeError::ArrayOutOfBounds {
                 count: elem_count,
                 width,
-                available_size: (data_end as usize) - (first as usize),
+                available_size,
+                bytes: Box::from(&self.value.bytes[0..available_size])
             });
         }
 

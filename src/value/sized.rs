@@ -16,9 +16,9 @@ impl SizedValue {
     /// Create a new `SizedValue` from a `u32` offset.
     /// # WARNING
     /// This only uses the lower 2 bytes for narrow pointers, so that they can be easily detected and fixed later
-    /// by the [`Encoder::_fix_pointer`] method. When you want to create a narrow pointer, use `new_narrow_pointer`
-    /// instead.
-    pub fn new_pointer(offset: u32) -> Option<Self> {
+    /// by the [`Encoder::_fix_pointer`] method. When you want to create a valid Fleece pointer, use
+    /// `new_narrow_pointer` / `new_wide_pointer`.
+    pub fn new_temp_pointer(offset: u32) -> Option<Self> {
         // TODO: Is this check necessary?
         if offset > pointer::MAX_WIDE {
             return None;
@@ -29,17 +29,27 @@ impl SizedValue {
             bytes[2..].copy_from_slice(&(offset as u16 >> 1).to_be_bytes());
             Some(Self { bytes })
         } else {
-            let mut bytes: [u8; 4] = (offset >> 1).to_be_bytes();
-            bytes[0] |= tag::POINTER;
-            Some(Self { bytes })
+            Self::new_wide_pointer(offset)
         }
     }
 
-    pub fn new_narrow_pointer(offset: u16) -> Self {
+    pub fn new_wide_pointer(offset: u32) -> Option<Self> {
+        if offset > pointer::MAX_WIDE {
+            return None;
+        }
+        let mut bytes: [u8; 4] = (offset >> 1).to_be_bytes();
+        bytes[0] |= tag::POINTER;
+        Some(Self { bytes })
+    }
+
+    pub fn new_narrow_pointer(offset: u16) -> Option<Self> {
+        if offset > pointer::MAX_NARROW {
+            return None;
+        }
         let mut bytes = [0_u8; 4];
         bytes[0..2].copy_from_slice(&(offset >> 1).to_be_bytes());
         bytes[0] |= tag::POINTER;
-        Self { bytes }
+        Some(Self { bytes })
     }
 
     pub fn value_type(&self) -> ValueType {
@@ -63,5 +73,11 @@ impl SizedValue {
     /// Only check this on pointers, the result is garbage for other types
     pub fn is_wide(&self) -> bool {
         self.bytes[0] & 0x3f != 0 || self.bytes[1] != 0 || self.bytes[2] & 0xC0 != 0
+    }
+
+    pub(crate) fn actual_offset(&self, out_len: usize) -> u32 {
+        (out_len
+            - unsafe { pointer::Pointer::from_value(self.as_value()).get_offset(self.is_wide()) })
+            as u32
     }
 }
