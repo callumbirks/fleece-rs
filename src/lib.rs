@@ -12,6 +12,9 @@ pub use encoder::Encoder;
 pub use scope::Scope;
 pub use sharedkeys::SharedKeys;
 pub use value::Value;
+pub use value::ValueType;
+pub use value::array::Array;
+pub use value::dict::Dict;
 
 #[inline]
 #[cold]
