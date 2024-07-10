@@ -24,7 +24,6 @@ pub fn read(data: &[u8]) -> (usize, u64) {
             if i == MAX_LEN && *byte > 1 {
                 return (0, 0);
             }
-            log::trace!("Read varint {} from {:?}", res, &data[..(i + 2)]);
             return (i + 2, res);
         }
     }

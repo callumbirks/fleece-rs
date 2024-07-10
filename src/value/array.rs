@@ -36,7 +36,6 @@ impl Array {
         let offset = index * width as usize;
         #[allow(clippy::cast_possible_wrap)]
         let first_pos = self.first_pos();
-        log::trace!("Array/Dict first pos: {first_pos}");
         #[allow(clippy::cast_possible_wrap)]
         let target = self
             .value
