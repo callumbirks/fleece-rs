@@ -1,5 +1,5 @@
 use crate::encoder::error::EncodeError;
-use crate::value::sized::SizedValue;
+use crate::value::SizedValue;
 
 #[derive(Default)]
 pub struct CollectionStack {
@@ -19,7 +19,6 @@ pub enum DictKey {
     Inline(SizedValue),
     // We keep an allocated copy of the key for sorting comparison, because the key is already written to the buffer
     Pointer(Box<str>, u32),
-    Shared(u16),
 }
 
 pub struct DictElement {
@@ -114,7 +113,10 @@ impl Dict {
     }
 
     pub fn push_value(&mut self, value: SizedValue) -> Option<()> {
-        self.values.push(DictElement { key: self.next_key.take()?, val: value });
+        self.values.push(DictElement {
+            key: self.next_key.take()?,
+            val: value,
+        });
         Some(())
     }
 }

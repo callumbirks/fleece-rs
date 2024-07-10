@@ -4,7 +4,7 @@ pub const MAX_LEN: usize = 10;
 
 pub fn read(data: &[u8]) -> (usize, u64) {
     if data.is_empty() {
-        return (0, 0)
+        return (0, 0);
     }
     if data[0] < 0x80 {
         return (1, u64::from(data[0]));
@@ -13,7 +13,7 @@ pub fn read(data: &[u8]) -> (usize, u64) {
     let mut shift: usize = 7;
     let mut res = u64::from(data[0] & 0x7F);
     let end: usize = data.len().min(MAX_LEN + 1);
-    
+
     for (i, byte) in data[1..end].iter().enumerate() {
         if *byte >= 0x80 {
             res |= u64::from(*byte & 0x7F) << shift;

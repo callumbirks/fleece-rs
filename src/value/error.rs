@@ -1,7 +1,5 @@
-use crate::Value;
-use std::backtrace::Backtrace;
-use thiserror::Error;
 use crate::value::ValueType;
+use thiserror::Error;
 
 pub type Result<T> = std::result::Result<T, DecodeError>;
 
@@ -19,7 +17,7 @@ pub enum DecodeError {
     PointerTargetOutOfBounds {
         data_start: usize,
         target: usize,
-        offset: usize,
+        offset: u32,
     },
     #[error("Array with width {width} and {count} elements exceeded the available {available_size} bytes")]
     ArrayOutOfBounds {

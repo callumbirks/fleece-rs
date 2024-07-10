@@ -1,9 +1,6 @@
-use log::LevelFilter;
-use std::fs::{File, OpenOptions};
-use std::sync::Arc;
+use std::fs::OpenOptions;
 
 use crate::encoder::Encoder;
-use crate::sharedkeys::SharedKeys;
 use crate::value::{varint, ValueType};
 
 use super::*;
@@ -28,6 +25,8 @@ fn decode_person_checks(person: &Value) {
         "Expected age to be a Short!"
     );
     assert_eq!(age.to_short(), 30, "Expected age to be 30!");
+    // Check the iterator also works, and returns the correct number of elements
+    assert_eq!(person_dict.into_iter().count(), 21);
 }
 
 #[test]
@@ -120,76 +119,11 @@ fn encode_people() {
 }
 
 #[test]
-fn shared_keys() {
-    let mut encoder = Encoder::new();
-    encoder.set_shared_keys(SharedKeys::new());
-    encoder.begin_dict();
-    encoder.write_key("name").expect("Failed to write key!");
-    encoder.write_value("John").expect("Failed to write value!");
-    // Keys with spaces cannot be encoded with SharedKeys, so this should be saved as a string
-    encoder
-        .write_key("Address Line 1")
-        .expect("Failed to write key!");
-    encoder
-        .write_value("3250 Olcott St")
-        .expect("Failed to write value!");
-
-    let shared_keys = Arc::new(encoder.shared_keys().unwrap());
-    let scope = encoder.finish_scoped().expect("Failed to create Scope");
-    assert_eq!(shared_keys.len(), 1, "Expected 1 shared key!");
-
-    let scoped_value = scope.root().expect("Scope has no root Value!");
-    let value = scoped_value.value();
-
-    let dict = value.as_dict().expect("Expected value to be a Dict!");
-    let name = dict.get("name").expect("Expected Dict to have key 'name'!");
-    let address = dict
-        .get("Address Line 1")
-        .expect("Expected Dict to have key 'Address Line 1'!");
-    assert_eq!(
-        name.value_type(),
-        ValueType::String,
-        "Expected name to be a String!"
-    );
-    assert_eq!(
-        address.value_type(),
-        ValueType::String,
-        "Expected address to be a String!"
-    );
-    assert_eq!(name.to_str(), "John", "Expected name to be 'John'!");
-    assert_eq!(
-        address.to_str(),
-        "3250 Olcott St",
-        "Address did not match expected!"
-    );
-}
-
-#[test]
-fn encode_people_shared_keys() {
-    let original = Value::from_bytes(PEOPLE_ENCODED).expect("Failed to decode Fleece");
-    let mut encoder = Encoder::new();
-    encoder.set_shared_keys(SharedKeys::new());
-    encoder
-        .write_fleece(original)
-        .expect("Failed to write value!");
-    let res = encoder.finish_scoped().expect("Failed to create Scope!");
-    let scoped_value = res.root().expect("Scope has no root!");
-    decode_people_checks(scoped_value.value());
-}
-
-#[test]
-fn scope_invalid_root() {
-    // Some bytes which are not valid Fleece
-    let bytes: Vec<u8> = vec![0x76, 0x61, 0x64, 0x65, 0x72];
-    let scope = Scope::new(bytes, None).expect("Failed to create Scope");
-    assert!(scope.root().is_none());
-}
-
-#[test]
 fn write_to_file() {
     let original = Value::from_bytes(PEOPLE_ENCODED).expect("Failed to decode Fleece");
     let file = OpenOptions::new()
         .write(true)
+        .truncate(true)
         .create(true)
         .open("test_1000people.fleece")
         .expect("Failed to open file");
@@ -218,9 +152,6 @@ fn encoder_multiple_top_level_collections() {
 }
 
 fn write_10_000() {
-    env_logger::builder()
-        .filter_level(LevelFilter::Debug)
-        .init();
     let original = Value::from_bytes(PEOPLE_ENCODED).unwrap();
     let file = OpenOptions::new()
         .write(true)
@@ -249,7 +180,7 @@ fn decode_10_000() {
     assert_eq!(value.value_type(), ValueType::Array);
     let array = value.as_array().unwrap();
     assert_eq!(array.len(), 1000 * 10);
-    
+
     for person in array {
         let person = person.as_dict().expect("Expected Person to be a Dict!");
         assert_eq!(person.len(), 21, "Expected Person to have 21 keys!");
@@ -270,4 +201,6 @@ fn decode_10_000() {
             "Expected age to be a Short!"
         );
     }
+
+    std::fs::remove_file("10_000people.fleece").expect("Failed to remove file");
 }

@@ -1,11 +1,11 @@
 use crate::encoder::value_stack;
 use crate::encoder::{Encodable, NullValue, UndefinedValue};
-use crate::{value, Value};
-use crate::value::sized::SizedValue;
+use crate::value::SizedValue;
 use crate::value::{array, varint};
+use crate::{value, Value};
 use std::io::{Result, Write};
 
-/// All of the built-in implementations of [`Encodable`].
+/// All the built-in implementations of [`Encodable`].
 
 impl Encodable for i64 {
     #[allow(clippy::cast_possible_truncation)]
@@ -104,7 +104,6 @@ impl Encodable for u32 {
         u64::from(*self).to_sized_value()
     }
 }
-
 
 impl Encodable for u16 {
     fn write_fleece_to<W: Write>(&self, writer: &mut W, is_wide: bool) -> Result<usize> {
@@ -409,7 +408,12 @@ impl Encodable for SizedValue {
     }
 }
 
-fn write_valuestack_collection<W: Write>(writer: &mut W, tag: u8, len: usize, is_wide: bool) -> Result<usize> {
+fn write_valuestack_collection<W: Write>(
+    writer: &mut W,
+    tag: u8,
+    len: usize,
+    is_wide: bool,
+) -> Result<usize> {
     let mut buf = [0_u8; 2 + varint::MAX_LEN];
     let written = 2 + if len >= array::VARINT_COUNT as usize {
         varint::write(&mut buf[2..], len as u64)
@@ -417,7 +421,7 @@ fn write_valuestack_collection<W: Write>(writer: &mut W, tag: u8, len: usize, is
         0
     };
     #[allow(clippy::cast_possible_truncation)]
-        let inline_size = len.min(array::VARINT_COUNT as usize) as u16;
+    let inline_size = len.min(array::VARINT_COUNT as usize) as u16;
 
     buf[0] = tag | (inline_size >> 8) as u8;
     buf[1] = (inline_size & 0xFF) as u8;
@@ -461,14 +465,18 @@ impl Encodable for value_stack::Dict {
 }
 
 pub trait AsBoxedValue {
+    /// Encode `self` into Fleece and Box the resulting `Value`, returning it.
     fn as_boxed_value(&self) -> Result<Box<Value>>;
 }
 
-impl<T> AsBoxedValue for T where T: Encodable + ?Sized {
+impl<T> AsBoxedValue for T
+where
+    T: Encodable + ?Sized,
+{
     fn as_boxed_value(&self) -> Result<Box<Value>> {
-        let mut alloced = Vec::with_capacity(self.fleece_size());
-        self.write_fleece_to(&mut alloced, false)?;
-        let boxed = alloced.into_boxed_slice();
-        Ok(unsafe { std::mem::transmute(boxed) })
+        let mut buf = Vec::with_capacity(self.fleece_size());
+        self.write_fleece_to(&mut buf, false)?;
+        let boxed = buf.into_boxed_slice();
+        Ok(unsafe { std::mem::transmute::<Box<[u8]>, Box<Value>>(boxed) })
     }
 }

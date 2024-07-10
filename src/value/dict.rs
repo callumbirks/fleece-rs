@@ -1,8 +1,6 @@
+use super::array;
 use super::array::Array;
-use super::{array, ValueType};
-use crate::encoder::{AsBoxedValue, Encodable};
-use crate::scope::Scope;
-use crate::sharedkeys::SharedKeys;
+use crate::encoder::AsBoxedValue;
 use crate::value::Value;
 use std::borrow::Borrow;
 use std::cmp::Ordering;
@@ -11,12 +9,7 @@ use std::ops::Index;
 // A Dict is just an Array, but the elements are alternating key, value
 #[repr(transparent)]
 pub struct Dict {
-    array: Array,
-}
-
-pub struct Element<'a> {
-    pub key: &'a Value,
-    pub val: &'a Value,
+    pub(crate) array: Array,
 }
 
 impl Dict {
@@ -42,7 +35,7 @@ impl Dict {
         R: ?Sized + Borrow<str>,
     {
         let key: &str = key.borrow();
-        let key: Box<Value> = self.encode_key(key)?;
+        let key: Box<Value> = key.as_boxed_value().ok()?;
 
         // We use binary search to find the key. This is possible because the dict keys are sorted.
         // This binary search implementation is borrowed from https://doc.rust-lang.org/std/vec/struct.Vec.html#method.binary_search_by
@@ -58,7 +51,7 @@ impl Dict {
             // coupled with the `left + size <= self.len()` invariant means
             // we have `left + size/2 < self.len()`, and this is in-bounds.
             let elem = unsafe { self._get_unchecked(mid) };
-            let cmp = Value::dict_key_cmp(&key, elem.key, self.is_wide());
+            let cmp = Value::dict_key_cmp(&key, elem.0, self.is_wide());
 
             // This control flow produces conditional moves, which results in
             // fewer branches and instructions than if/else or matching on
@@ -72,7 +65,7 @@ impl Dict {
             right = if cmp == Ordering::Less { mid } else { right };
             if cmp == Ordering::Equal {
                 // SAFETY: same as the `get_unchecked` above
-                return Some(elem.val);
+                return Some(elem.1);
             }
 
             size = right - left;
@@ -81,73 +74,54 @@ impl Dict {
     }
 
     /// The first key-value pair in the dict
-    pub fn first(&self) -> Option<Element> {
-        if self.len() == 0 {
+    #[must_use]
+    pub fn first(&self) -> Option<(&Value, &Value)> {
+        if self.is_empty() {
             return None;
         }
         Some(unsafe { self._get_unchecked(0) })
     }
 
+    #[must_use]
     pub fn is_wide(&self) -> bool {
         self.array.is_wide()
     }
 
+    #[must_use]
     pub fn width(&self) -> u8 {
         self.array.width()
     }
 
     /// The number of key-value pairs in this dict.
+    #[must_use]
     pub fn len(&self) -> usize {
         self.array.len() / 2
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.array.is_empty()
     }
 }
 
 impl Dict {
-    unsafe fn _get_unchecked(&self, index: usize) -> Element {
+    unsafe fn _get_unchecked(&self, index: usize) -> (&Value, &Value) {
         let offset = 2 * index;
         let key = self.array.get_unchecked(offset);
         let val = self.array.get_unchecked(offset + 1);
-        Element { key, val }
-    }
-
-    /// Attempt to encode a key string to a `Value`. If this `Dict` uses `SharedKeys`, and they can 
-    /// be found, and the key exists in the shared keys, the returned value will be a short with the
-    /// corresponding encoded key.
-    /// Otherwise, the returned `Value` will be a String containing the input key.
-    fn encode_key(&self, key: &str) -> Option<Box<Value>> {
-        if self.uses_shared_keys() {
-            let first = unsafe { self._get_unchecked(0).key };
-            if let Some(shared_keys) = Scope::find_shared_keys(first.bytes.as_ptr()) {
-                if let Some(encoded) = shared_keys.encode(key) {
-                    return encoded.as_boxed_value().ok();
-                }
-            }
-        }
-        key.as_boxed_value().ok()
-    }
-
-    fn uses_shared_keys(&self) -> bool {
-        let len = self.len();
-        if len == 0 {
-            return false;
-        }
-        let first_key = unsafe { self._get_unchecked(0).key };
-
-        if Dict::is_parent_key(first_key) {
-            if len > 1 {
-                let second_key = unsafe { self._get_unchecked(1).key };
-                second_key.value_type() == ValueType::Short
-            } else {
-                false
-            }
-        } else {
-            first_key.value_type() == ValueType::Short
-        }
+        (key, val)
     }
 
     fn is_parent_key(value: &Value) -> bool {
         const PARENT_KEY: [u8; 2] = [(crate::value::tag::SHORT << 4) | 0x08, 0];
         value.bytes[..2] == PARENT_KEY
+    }
+
+    #[must_use]
+    pub fn iter(&self) -> Iter {
+        Iter {
+            array_iter: self.array.into_iter(),
+        }
     }
 }
 
@@ -161,18 +135,17 @@ impl Index<&str> for Dict {
 
 // As a Dict is just an Array but with alternating key-value pairs, we can use ArrayIterator for
 // the implementation of DictIterator.
-#[repr(transparent)]
 pub struct Iter<'a> {
     array_iter: array::Iter<'a>,
 }
 
 impl<'a> Iterator for Iter<'a> {
-    type Item = Element<'a>;
+    type Item = (&'a str, &'a Value);
 
     fn next(&mut self) -> Option<Self::Item> {
-        let key = self.array_iter.next()?;
+        let key = self.array_iter.next()?.to_str();
         let val = self.array_iter.next()?;
-        Some(Element { key, val })
+        Some((key, val))
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -182,12 +155,10 @@ impl<'a> Iterator for Iter<'a> {
 }
 
 impl<'a> IntoIterator for &'a Dict {
-    type Item = Element<'a>;
+    type Item = (&'a str, &'a Value);
     type IntoIter = Iter<'a>;
 
     fn into_iter(self) -> Self::IntoIter {
-        Iter {
-            array_iter: self.array.into_iter(),
-        }
+        self.iter()
     }
 }

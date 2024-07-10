@@ -1,28 +1,25 @@
 use crate::encoder::value_stack::{Collection, CollectionStack, DictKey};
-use crate::sharedkeys::SharedKeys;
 use crate::value;
 use crate::value::pointer::Pointer as ValuePointer;
-use crate::value::sized::SizedValue;
+use crate::value::SizedValue;
 use crate::value::{pointer, ValueType};
 use error::Result;
 use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::io::Write;
-use std::ptr;
-use std::sync::Arc;
 
 mod encodable;
 mod error;
 mod value_stack;
 
-use crate::scope::Scope;
 pub use encodable::AsBoxedValue;
 pub use error::EncodeError;
 
-struct NullValue;
-struct UndefinedValue;
+pub struct NullValue;
+pub struct UndefinedValue;
 
 // Implementations are in the `encodable` module
+/// This trait is required for a value to be written to the `Encoder`.
 pub trait Encodable {
     /// Write self to the given writer, encoded as Fleece. Return [`None`] if any write operations fail.
     /// Return [`Some`] with the number of bytes written if the value was written successfully.
@@ -38,7 +35,6 @@ pub trait Encodable {
 #[derive(Default)]
 pub struct Encoder<W: Write> {
     out: W,
-    shared_keys: Option<SharedKeys>,
     collection_stack: CollectionStack,
     len: usize,
     top_collection_closed: bool,
@@ -55,7 +51,6 @@ impl<W: Write> Encoder<W> {
     pub fn new_to_writer(out: W) -> Self {
         Self {
             out,
-            shared_keys: None,
             collection_stack: CollectionStack::new(),
             len: 0,
             top_collection_closed: false,
@@ -70,9 +65,9 @@ impl<W: Write> Encoder<W> {
     pub fn write_key(&mut self, key: &str) -> Result<()> {
         if let Some(val) = key.to_sized_value() {
             // Keys which are small enough are inlined.
-            self._write_key_narrow(val)
+            self._write_key_inline(val)
         } else {
-            self._write_key(key)
+            self._write_key_pointer(key)
         }
     }
 
@@ -148,30 +143,10 @@ impl<W: Write> Encoder<W> {
                 let Some(dict) = value.as_dict() else {
                     unreachable!()
                 };
-                let is_wide = dict.is_wide();
-                let shared_keys = Scope::find_shared_keys(ptr::from_ref(dict) as *const u8);
-                self.begin_dict();
-                for elem in dict {
-                    let key = match elem.key.value_type() {
-                        ValueType::Pointer => unsafe {
-                            ValuePointer::from_value(elem.key)
-                                .deref_unchecked(is_wide)
-                                .to_str()
-                        },
-                        ValueType::Short => {
-                            if let Some(shared_keys) = &shared_keys {
-                                shared_keys.decode(elem.key.to_short() as u16).unwrap_or("")
-                            } else {
-                                ""
-                            }
-                        }
-                        _ => elem.key.to_str(),
-                    };
-                    if key.is_empty() {
-                        return Err(EncodeError::SharedKeysInvalidKey);
-                    }
+                self.begin_dict()?;
+                for (key, value) in dict {
                     self.write_key(key)?;
-                    self.write_fleece(elem.val)?;
+                    self.write_fleece(value)?;
                 }
                 self.end_dict()
             }
@@ -206,13 +181,14 @@ impl<W: Write> Encoder<W> {
             self._write(v, is_wide)?;
         }
 
-        self._finished_collection(offset);
+        self._finished_collection(offset)?;
 
         Ok(())
     }
 
-    pub fn begin_dict(&mut self) {
-        self.collection_stack.push_dict();
+    pub fn begin_dict(&mut self) -> Result<()> {
+        self.collection_stack.push_dict()?;
+        Ok(())
     }
 
     /// This *MUST* follow the implementation at [`value::Value::dict_key_cmp`]
@@ -232,11 +208,6 @@ impl<W: Write> Encoder<W> {
             (DictKey::Pointer(val1, _), DictKey::Inline(value2)) => {
                 val1.as_ref().cmp(value2.as_value().to_str())
             }
-            // SharedKeys
-            (DictKey::Shared(value1), DictKey::Shared(value2)) => value1.cmp(value2),
-            // SharedKeys are sorted first in the dict
-            (DictKey::Shared(_), _) => Ordering::Less,
-            (_, DictKey::Shared(_)) => Ordering::Greater,
         }
     }
 
@@ -273,13 +244,6 @@ impl<W: Write> Encoder<W> {
         for elem in &dict.values {
             match &elem.key {
                 DictKey::Inline(val) => self._write(val, is_wide)?,
-                DictKey::Shared(int_key) => {
-                    // Unwrap is safe because u16::to_value only fails if > 2047, that's never the case for shared keys
-                    let Some(val) = int_key.to_sized_value() else {
-                        unreachable!()
-                    };
-                    self._write(&val, is_wide)?
-                }
                 DictKey::Pointer(_, offset) => {
                     if is_wide {
                         let Some(val) = SizedValue::new_wide_pointer(*offset) else {
@@ -299,7 +263,7 @@ impl<W: Write> Encoder<W> {
         }
 
         #[allow(clippy::cast_possible_truncation)]
-        self._finished_collection(offset);
+        self._finished_collection(offset)?;
 
         Ok(())
     }
@@ -309,34 +273,8 @@ impl<W: Write> Encoder<W> {
         self.out.flush().ok();
         self.out
     }
-
-    pub fn shared_keys(&self) -> Option<SharedKeys> {
-        self.shared_keys.clone()
-    }
-
-    /// Consumes the shared keys given, so they can be safely appended to. When the encoder is finished, call
-    /// [`Encoder::shared_keys`] to get the updated shared keys.
-    pub fn set_shared_keys(&mut self, shared_keys: SharedKeys) {
-        self.shared_keys = Some(shared_keys);
-    }
 }
 
-impl<W: Write> Encoder<W>
-where
-    Arc<[u8]>: From<W>,
-{
-    /// Finish encoding and allocate the result in a new `Scope`. That Scope will hold the
-    /// `SharedKeys` this encoder held (if any).
-    pub fn finish_scoped(mut self) -> Option<Arc<Scope>> {
-        self._end();
-        self.out.flush().ok();
-        let out = self.out;
-        let shared_keys = self.shared_keys.map(Arc::new);
-        Scope::new(out, shared_keys)
-    }
-}
-
-// private
 impl<W: Write> Encoder<W> {
     // Always use this function to write values to the output buffer, because it makes sure all values
     // are evenly aligned.
@@ -359,27 +297,7 @@ impl<W: Write> Encoder<W> {
         Ok(offset)
     }
 
-    /// If we have shared keys, try to encode the key using those. Otherwise, write the key as a
-    /// pointer.
-    fn _write_key(&mut self, key: &str) -> Result<()> {
-        if let Some(shared_keys) = &mut self.shared_keys {
-            let Some(Collection::Dict(dict)) = self.collection_stack.top_mut() else {
-                return Err(EncodeError::DictNotOpen);
-            };
-            // If we have shared keys, insert the key into the shared keys and add the corresponding int key to the Dict
-            let Some(int_key) = shared_keys.encode_and_insert(key) else {
-                return self._write_key_nonshared(key);
-            };
-            // Unwrap is safe here because `u16::to_value` will only fail if the value is > 2047, which it will never
-            // be because the shared_keys holds max 2048 keys (and the first one is 0)
-            dict.push_key(DictKey::Shared(int_key))
-                .ok_or_else(|| EncodeError::DictWaitingForValue)
-        } else {
-            self._write_key_nonshared(key)
-        }
-    }
-
-    fn _write_key_narrow(&mut self, val: SizedValue) -> Result<()> {
+    fn _write_key_inline(&mut self, val: SizedValue) -> Result<()> {
         let Some(Collection::Dict(dict)) = self.collection_stack.top_mut() else {
             return Err(EncodeError::DictNotOpen);
         };
@@ -388,7 +306,7 @@ impl<W: Write> Encoder<W> {
             .ok_or_else(|| EncodeError::DictWaitingForValue)
     }
 
-    fn _write_key_nonshared(&mut self, key: &str) -> Result<()> {
+    fn _write_key_pointer(&mut self, key: &str) -> Result<()> {
         // If we don't have shared keys, write the key to the output buffer and add a pointer to it in the Dict
         let offset = self._write(key, false)?;
         let Some(Collection::Dict(dict)) = self.collection_stack.top_mut() else {
@@ -502,7 +420,7 @@ impl<W: Write> Encoder<W> {
 
         let pointer = ValuePointer::from_value(pointer.as_value());
 
-        let offset_from_start = unsafe { pointer.get_offset(temp_pointer.is_wide()) } as u32;
+        let offset_from_start = unsafe { pointer.get_offset(temp_pointer.is_wide()) };
         let offset = len - offset_from_start;
         if is_wide {
             SizedValue::new_wide_pointer(offset).expect("Pointer unexpectedly large")
@@ -528,7 +446,7 @@ impl<W: Write> Encoder<W> {
             // This root value points to the outermost collection.
             let offset = self._actual_pointer_offset(offset_from_start);
             #[allow(clippy::cast_possible_truncation)]
-            let root = if offset <= pointer::MAX_NARROW as u32 {
+            let root = if offset <= u32::from(pointer::MAX_NARROW) {
                 SizedValue::new_narrow_pointer(offset as u16)
             } else {
                 // The root value must be 2 bytes, so if the pointer to the top-level collection

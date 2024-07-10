@@ -1,40 +1,11 @@
-mod encoder;
-mod scope;
-mod sharedkeys;
-mod value;
-
-// Example of modules
-//#[cfg(feature = "datetime")]
-//mod datetime;
-//#[cfg(feature = "serde")]
+pub mod encoder;
+pub mod value;
 
 pub use encoder::Encoder;
-pub use scope::Scope;
-pub use sharedkeys::SharedKeys;
-pub use value::Value;
-pub use value::ValueType;
 pub use value::array::Array;
 pub use value::dict::Dict;
-
-#[inline]
-#[cold]
-pub(crate) fn cold() {}
-
-#[inline]
-pub(crate) fn likely(b: bool) -> bool {
-    if !b {
-        cold();
-    }
-    b
-}
-
-#[inline]
-pub(crate) fn unlikely(b: bool) -> bool {
-    if b {
-        cold();
-    }
-    b
-}
+pub use value::Value;
+pub use value::ValueType;
 
 #[cfg(test)]
 mod tests;

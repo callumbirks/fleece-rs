@@ -1,11 +1,10 @@
 use super::error::{DecodeError, Result};
-use crate::unlikely;
 use crate::value::pointer::Pointer;
 use crate::value::{varint, Value, ValueType};
 
 #[repr(transparent)]
 pub struct Array {
-    value: Value,
+    pub(crate) value: Value,
 }
 
 pub const VARINT_COUNT: u16 = 0x07FF;
@@ -22,6 +21,7 @@ impl Array {
         unsafe { std::mem::transmute(value) }
     }
 
+    #[must_use]
     pub fn get(&self, index: usize) -> Option<&Value> {
         if index > self.len() {
             return None;
@@ -38,7 +38,9 @@ impl Array {
         let first_pos = self.first_pos();
         log::trace!("Array/Dict first pos: {first_pos}");
         #[allow(clippy::cast_possible_wrap)]
-        let target = self.value._offset_unchecked((first_pos + offset) as isize, width);
+        let target = self
+            .value
+            ._offset_unchecked((first_pos + offset) as isize, width);
         if target.value_type() == ValueType::Pointer {
             Pointer::from_value(target).deref_unchecked(self.is_wide())
         } else {
@@ -47,12 +49,12 @@ impl Array {
     }
 
     pub(super) fn first_pos(&self) -> usize {
-        if self.value.len() < 2 {
+        if self.value.bytes.len() < 2 {
             return 0;
         }
         let size = self.value._get_short() & VARINT_COUNT;
 
-        if unlikely(size == VARINT_COUNT) {
+        if size == VARINT_COUNT {
             let (read, _) = varint::read(&self.value.bytes[2..]);
             // First pos is 2 + varint len
             if read % 2 != 0 {
@@ -66,10 +68,12 @@ impl Array {
         }
     }
 
+    #[must_use]
     pub fn is_wide(&self) -> bool {
         self.value.bytes[0] & 0x08 != 0
     }
 
+    #[must_use]
     pub fn width(&self) -> u8 {
         if self.is_wide() {
             4
@@ -79,9 +83,10 @@ impl Array {
     }
 
     /// The number of values in this array.
+    #[must_use]
     pub fn len(&self) -> usize {
         let size = self.value._get_short() & VARINT_COUNT;
-        if unlikely(size == VARINT_COUNT) {
+        if size == VARINT_COUNT {
             let (read, size) = varint::read(&self.value.bytes[2..]);
             #[allow(clippy::cast_possible_truncation)]
             if read == 0 {
@@ -98,17 +103,34 @@ impl Array {
         }
     }
 
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    #[must_use]
+    pub fn iter(&self) -> Iter {
+        Iter {
+            next: self._iter_first(),
+            width: self.width(),
+            index: 0,
+            len: self.len(),
+        }
+    }
+
     /// The first value in the array. Does *NOT* dereference pointers, because the iterator will
     /// need to offset from this value.
     fn _iter_first(&self) -> Option<&Value> {
-        if self.len() == 0 {
+        if self.is_empty() {
             return None;
         }
 
         #[allow(clippy::cast_possible_wrap)]
-        Some(unsafe { self.value._offset_unchecked(self.first_pos() as isize, self.width()) })
+        Some(unsafe {
+            self.value
+                ._offset_unchecked(self.first_pos() as isize, self.width())
+        })
     }
-
 }
 
 // Validation
@@ -122,13 +144,13 @@ impl Array {
         let elem_count = self.len();
 
         let first = unsafe { self.value.bytes.as_ptr().add(self.first_pos()) };
-        if unlikely((first as usize) + (elem_count * width) > (data_end as usize)) {
+        if (first as usize) + (elem_count * width) > (data_end as usize) {
             let available_size = data_end as usize - first as usize;
             return Err(DecodeError::ArrayOutOfBounds {
                 count: elem_count,
                 width,
                 available_size,
-                bytes: Box::from(&self.value.bytes[0..available_size])
+                bytes: Box::from(&self.value.bytes[0..available_size]),
             });
         }
 
@@ -146,10 +168,10 @@ impl Array {
 
 // Iterator
 pub struct Iter<'a> {
-    next: Option<&'a Value>,
-    width: u8,
-    index: usize,
-    len: usize,
+    pub(super) next: Option<&'a Value>,
+    pub(super) width: u8,
+    pub(super) index: usize,
+    pub(super) len: usize,
 }
 
 impl Iter<'_> {
@@ -175,8 +197,12 @@ impl<'a> Iterator for Iter<'a> {
             current
         };
 
-        self.next = Some(unsafe { current._offset_unchecked(self.width as isize, self.width) });
         self.index += 1;
+        self.next = if self.index < self.len {
+            Some(unsafe { current._offset_unchecked(self.width as isize, self.width) })
+        } else {
+            None
+        };
 
         Some(current_resolved)
     }
@@ -191,11 +217,6 @@ impl<'a> IntoIterator for &'a Array {
     type IntoIter = Iter<'a>;
 
     fn into_iter(self) -> Self::IntoIter {
-        Iter {
-            next: self._iter_first(),
-            width: self.width(),
-            index: 0,
-            len: self.len(),
-        }
+        self.iter()
     }
 }

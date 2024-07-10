@@ -12,8 +12,6 @@ pub enum EncodeError {
     DictWaitingForValue,
     #[error("Cannot write a value until a key has been written")]
     DictWaitingForKey,
-    #[error("The key could not be encoded with shared keys, the key must be invalid")]
-    SharedKeysInvalidKey,
     #[error("No open collection to write value to")]
     CollectionNotOpen,
     #[error("IOError while writing value")]

@@ -4,12 +4,15 @@ pub(crate) mod array;
 pub(crate) mod dict;
 mod error;
 pub(super) mod pointer;
-pub(crate) mod sized;
+mod sized;
 pub(crate) mod varint;
 
-use crate::value::error::DecodeError;
+pub use array::Array;
+pub use dict::Dict;
+pub use sized::SizedValue;
+
 use crate::value::pointer::Pointer;
-use crate::{likely, unlikely};
+pub use error::DecodeError;
 use error::Result;
 use std::cmp::Ordering;
 use std::fmt::{Debug, Formatter};
@@ -41,7 +44,7 @@ pub enum ValueType {
     Pointer,
 }
 
-pub mod tag {
+pub(crate) mod tag {
     pub const SHORT: u8 = 0x00;
     pub const INT: u8 = 0x10;
     pub const FLOAT: u8 = 0x20;
@@ -54,14 +57,14 @@ pub mod tag {
     pub const POINTER: u8 = 0x80;
 }
 
-pub mod special_tag {
+pub(crate) mod special_tag {
     pub const NULL: u8 = 0x00;
     pub const UNDEFINED: u8 = 0x0C;
     pub const FALSE: u8 = 0x04;
     pub const TRUE: u8 = 0x08;
 }
 
-pub mod extra_flags {
+pub(crate) mod extra_flags {
     pub const UNSIGNED_INT: u8 = 0x08;
     pub const DOUBLE_ENCODED: u8 = 0x08;
     pub const DOUBLE_DECODED: u8 = 0x04;
@@ -70,6 +73,7 @@ pub mod extra_flags {
 impl ValueType {
     #[allow(clippy::inline_always)]
     #[inline(always)]
+    #[must_use]
     pub fn from_byte(byte: u8) -> Self {
         match byte & 0xF0 {
             // Some types have extra info in the lower 4 bits
@@ -153,9 +157,9 @@ impl Value {
         // Root is 2 bytes at the end of the data
         let root = &data[(data.len() - 2)..];
         let root: &Value = std::mem::transmute(root);
-        if likely(root.value_type() == ValueType::Pointer) {
+        if root.value_type() == ValueType::Pointer {
             return Pointer::from_value(root).deref_unchecked(false);
-        } else if unlikely(data.len() == 2) {
+        } else if data.len() == 2 {
             return root;
         }
         panic!("Invalid data");
@@ -167,69 +171,6 @@ impl Value {
     #[must_use]
     pub fn value_type(&self) -> ValueType {
         ValueType::from_byte(self.bytes[0])
-    }
-
-    pub fn annotate(&self, data: &[u8]) -> String {
-        let self_offset = self.bytes.as_ptr() as usize - data.as_ptr() as usize;
-        let self_range = self_offset..(self_offset + self.required_size());
-        let mut output = String::new();
-        output.push_str(&format!("{:?} = ", &data[self_range]));
-        if self.bytes.is_empty() {
-            return "Empty".to_string();
-        }
-        match self.value_type() {
-            ValueType::Null => output.push_str("Null"),
-            ValueType::Undefined => output.push_str("Undefined"),
-            ValueType::False => output.push_str("False"),
-            ValueType::True => output.push_str("True"),
-            ValueType::Short => output.push_str(&format!("{:?}", self.to_short())),
-            ValueType::UnsignedInt => output.push_str(&format!("{:?}", self.to_unsigned_int())),
-            ValueType::Int => output.push_str(&format!("{:?}", self.to_int())),
-            ValueType::Float | ValueType::Double32 | ValueType::Double64 => {
-                output.push_str(&format!("{:?}", self.to_float()))
-            }
-            ValueType::String => output.push_str(&format!("{:?}", self.to_str())),
-            ValueType::Data => output.push_str(&format!("{:?}", self.to_data())),
-            ValueType::Array => {
-                let array = self.as_array().unwrap();
-                let mut string = "Array [".to_string();
-                for (i, val) in array.into_iter().enumerate() {
-                    string.push_str(&val.annotate(data));
-                    if i < array.len() - 1 {
-                        string.push_str(", ");
-                    }
-                }
-                string.push(']');
-                output.push_str(&string);
-            }
-            ValueType::Dict => {
-                let dict = self.as_dict().unwrap();
-                let mut string = "Dict {".to_string();
-                for (i, elem) in dict.into_iter().enumerate() {
-                    string.push_str(&elem.key.annotate(data));
-                    string.push_str(", ");
-                    string.push_str(&elem.val.annotate(data));
-                    if i < dict.len() - 1 {
-                        string.push_str(", ");
-                    }
-                }
-                string.push('}');
-                output.push_str(&string);
-            }
-            ValueType::Pointer => {
-                let pointer = Pointer::from_value(self);
-                let narrow_offset = unsafe { pointer.get_offset(false) };
-                let wide_offset = if self.len() >= 4 {
-                    unsafe { pointer.get_offset(true) }
-                } else {
-                    0
-                };
-                output.push_str(&format!(
-                    "Pointer {{ if narrow: -{narrow_offset}, if wide: -{wide_offset} }}"
-                ));
-            }
-        };
-        output
     }
 }
 
@@ -268,6 +209,22 @@ impl Value {
             }
             ValueType::Int | ValueType::UnsignedInt => self.to_int() as i16,
             ValueType::Float | ValueType::Double32 | ValueType::Double64 => self.to_double() as i16,
+            _ => 0,
+        }
+    }
+
+    #[allow(clippy::match_same_arms)]
+    #[allow(clippy::cast_possible_truncation)]
+    #[allow(clippy::cast_possible_wrap)]
+    #[allow(clippy::cast_sign_loss)]
+    #[must_use]
+    pub fn to_unsigned_short(&self) -> u16 {
+        match self.value_type() {
+            ValueType::True => 1,
+            ValueType::False => 0,
+            ValueType::Short => self._get_short(),
+            ValueType::Int | ValueType::UnsignedInt => self.to_unsigned_int() as u16,
+            ValueType::Float | ValueType::Double32 | ValueType::Double64 => self.to_double() as u16,
             _ => 0,
         }
     }
@@ -342,18 +299,18 @@ impl Value {
 // Conversion to equivalent types
 impl Value {
     #[must_use]
-    pub fn as_array(&self) -> Option<&array::Array> {
-        if likely(self.value_type() == ValueType::Array) {
-            Some(array::Array::from_value(self))
+    pub fn as_array(&self) -> Option<&Array> {
+        if self.value_type() == ValueType::Array {
+            Some(Array::from_value(self))
         } else {
             None
         }
     }
 
     #[must_use]
-    pub fn as_dict(&self) -> Option<&dict::Dict> {
-        if likely(self.value_type() == ValueType::Dict) {
-            Some(dict::Dict::from_value(self))
+    pub fn as_dict(&self) -> Option<&Dict> {
+        if self.value_type() == ValueType::Dict {
+            Some(Dict::from_value(self))
         } else {
             None
         }
@@ -366,7 +323,7 @@ impl Value {
     /// correctly sized. To ensure the validity of the Fleece data, one should also call `RawValue::validate()`
     fn _find_root(data: &[u8]) -> Result<&Self> {
         // Data must be at least 2 bytes, and evenly sized
-        if unlikely(data.is_empty() || data.len() % 2 != 0) {
+        if data.is_empty() || data.len() % 2 != 0 {
             return Err(DecodeError::InputIncorrectlySized);
         }
         // Root is 2 bytes at the end of the data
@@ -389,7 +346,7 @@ impl Value {
     ) -> Result<()> {
         match self.value_type() {
             ValueType::Array | ValueType::Dict => {
-                array::Array::from_value(self).validate(data_start, data_end)
+                Array::from_value(self).validate(data_start, data_end)
             }
             ValueType::Pointer => {
                 let target = Pointer::from_value(self).deref_checked(is_wide, data_start)?;
@@ -399,9 +356,7 @@ impl Value {
                 // We don't need to validate that array elements fit within the data, as
                 // Array::validate already does that. This improves benchmark performance by ~15%.
                 if IS_ARR_ELEM
-                    || likely(
-                        self.bytes.as_ptr() as usize + self.required_size() <= data_end as usize,
-                    )
+                    || self.bytes.as_ptr() as usize + self.required_size() <= data_end as usize
                 {
                     Ok(())
                 } else {
@@ -492,22 +447,17 @@ impl Value {
                 debug_assert_ne!(val1, "", "value1 is not a pointer to a string!");
                 val1.cmp(value2.to_str())
             }
-            // SharedKeys
-            (ValueType::Short, ValueType::Short) => value1.to_short().cmp(&value2.to_short()),
-            // SharedKeys are sorted first in the dict
-            (ValueType::Short, _) => Ordering::Less,
-            (_, ValueType::Short) => Ordering::Greater,
             _ => unreachable!(),
         }
     }
 
-    /// Converts a pointer to a `RawValue` reference, and validates its size
+    /// Converts a pointer to a `Value`, and validates its size
     pub(super) fn _from_raw<'a>(ptr: *const u8, available_size: usize) -> Result<&'a Value> {
         let target: &Value = unsafe {
             let slice = std::slice::from_raw_parts(ptr, available_size);
             std::mem::transmute(slice)
         };
-        if unlikely(target.len() < 2 || target.required_size() > available_size) {
+        if target.len() < 2 || target.required_size() > available_size {
             Err(DecodeError::ValueOutOfBounds {
                 value_type: target.value_type(),
                 required_size: target.required_size(),
@@ -553,7 +503,7 @@ impl Value {
     }
 
     fn _get_data(&self) -> &[u8] {
-        if unlikely(self.bytes.len() < 2) {
+        if self.bytes.len() < 2 {
             return &[];
         }
         let inline_size = self.bytes[0] & 0x0F;
@@ -609,11 +559,11 @@ impl Debug for Value {
             ValueType::Data => out.field("val", &self.to_data()),
             ValueType::Array => out.field(
                 "val",
-                &format!("len: {}", self.as_array().map_or(0, array::Array::len)),
+                &format!("len: {}", self.as_array().map_or(0, Array::len)),
             ),
             ValueType::Dict => out.field(
                 "val",
-                &format!("len: {}", self.as_dict().map_or(0, dict::Dict::len)),
+                &format!("len: {}", self.as_dict().map_or(0, Dict::len)),
             ),
             ValueType::Pointer => {
                 let pointer = Pointer::from_value(self);

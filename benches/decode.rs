@@ -1,23 +1,14 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
-use fleece_rs::{Encoder, SharedKeys, Value};
+use fleece_rs::Value;
 
 const PERSON_ENCODED: &[u8] = include_bytes!("../1person.fleece");
 const PEOPLE_ENCODED: &[u8] = include_bytes!("../1000people.fleece");
-const PEOPLE_100_000_ENCODED: &[u8] = include_bytes!("../100_000people.fleece");
 
 fn decode_people(c: &mut Criterion) {
     c.bench_function("decode_people", |b| {
         b.iter(|| {
             let _ = Value::from_bytes(black_box(PEOPLE_ENCODED));
-        });
-    });
-}
-
-fn decode_100_000_people(c: &mut Criterion) {
-    c.bench_function("decode_100_000_people", |b| {
-        b.iter(|| {
-            let _ = Value::from_bytes(black_box(PEOPLE_100_000_ENCODED));
         });
     });
 }
@@ -30,42 +21,5 @@ fn decode_people_unchecked(c: &mut Criterion) {
     });
 }
 
-fn decode_people_sharedkeys(c: &mut Criterion) {
-    let value = Value::from_bytes(PEOPLE_ENCODED).unwrap();
-    let mut encoder = Encoder::new();
-    encoder.set_shared_keys(SharedKeys::new());
-    encoder.write_fleece(value).unwrap();
-    let scope = encoder.finish_scoped().unwrap();
-    let data = scope.data().unwrap();
-
-    c.bench_function("decode_people_sharedkeys", |b| {
-        b.iter(|| {
-            let _ = Value::from_bytes(&data);
-        });
-    });
-}
-
-fn decode_100_000_people_sharedkeys(c: &mut Criterion) {
-    let value = Value::from_bytes(PEOPLE_100_000_ENCODED).unwrap();
-    let mut encoder = Encoder::new();
-    encoder.set_shared_keys(SharedKeys::new());
-    encoder.write_fleece(value).unwrap();
-    let scope = encoder.finish_scoped().unwrap();
-    let data = scope.data().unwrap();
-
-    c.bench_function("decode_100_000_people_sharedkeys", |b| {
-        b.iter(|| {
-            let _ = Value::from_bytes(&data);
-        });
-    });
-}
-
-criterion_group!(
-    decode_benches,
-    decode_people,
-    decode_people_unchecked,
-    decode_people_sharedkeys,
-    decode_100_000_people,
-    decode_100_000_people_sharedkeys,
-);
+criterion_group!(decode_benches, decode_people, decode_people_unchecked,);
 criterion_main!(decode_benches);
