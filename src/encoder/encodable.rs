@@ -53,7 +53,7 @@ impl Encodable for u64 {
         }
         let mut buf = [0_u8; 9];
         let byte_count = self.fleece_size() - 1;
-        buf[0] = value::tag::INT | ((byte_count as u8) - 1);
+        buf[0] = value::tag::INT | value::extra_flags::UNSIGNED_INT | ((byte_count as u8) - 1);
         buf[1..].copy_from_slice(&self.to_le_bytes());
         writer.write_all(&buf[..=byte_count])?;
         Ok(byte_count + 1)
@@ -63,7 +63,8 @@ impl Encodable for u64 {
         if *self <= 2047 {
             2
         } else {
-            8 - self.trailing_zeros() as usize + 1
+            let trailing_zeros = (self.trailing_zeros() + 7) / 8;
+            8 - trailing_zeros as usize + 1
         }
     }
 
@@ -154,6 +155,34 @@ impl Encodable for i16 {
         // Make sure to zero out the top 4 bits (where the tag goes) in-case of sign extension
         bytes[0] = (bytes[0] & 0x0F) | value::tag::SHORT;
         Some(SizedValue::from_narrow(bytes))
+    }
+}
+
+impl Encodable for u8 {
+    fn write_fleece_to<W: Write>(&self, writer: &mut W, is_wide: bool) -> Result<usize> {
+        (*self as u16).write_fleece_to(writer, is_wide)
+    }
+
+    fn fleece_size(&self) -> usize {
+        (*self as u16).fleece_size()
+    }
+
+    fn to_sized_value(&self) -> Option<SizedValue> {
+        (*self as u16).to_sized_value()
+    }
+}
+
+impl Encodable for i8 {
+    fn write_fleece_to<W: Write>(&self, writer: &mut W, is_wide: bool) -> Result<usize> {
+        (*self as i16).write_fleece_to(writer, is_wide)
+    }
+
+    fn fleece_size(&self) -> usize {
+        (*self as i16).fleece_size()
+    }
+
+    fn to_sized_value(&self) -> Option<SizedValue> {
+        (*self as i16).to_sized_value()
     }
 }
 

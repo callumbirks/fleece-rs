@@ -4,6 +4,7 @@ use crate::encoder::AsBoxedValue;
 use crate::value::Value;
 use std::borrow::Borrow;
 use std::cmp::Ordering;
+use std::fmt::{Debug, Formatter};
 use std::ops::Index;
 
 // A Dict is just an Array, but the elements are alternating key, value
@@ -19,7 +20,7 @@ impl Dict {
     /// considered valid.
     #[allow(clippy::transmute_ptr_to_ptr)]
     #[inline]
-    pub(super) fn from_value(value: &Value) -> &Self {
+    pub(crate) fn from_value(value: &Value) -> &Self {
         unsafe { std::mem::transmute(value) }
     }
 
@@ -102,6 +103,13 @@ impl Dict {
     pub fn is_empty(&self) -> bool {
         self.array.is_empty()
     }
+
+    pub fn clone_box(&self) -> Box<Dict> {
+        unsafe {
+            Box::from_raw(Box::into_raw(self.array.value.clone_box()) as *mut Dict)
+        }
+    }
+
 }
 
 impl Dict {
@@ -136,7 +144,7 @@ impl Index<&str> for Dict {
 // As a Dict is just an Array but with alternating key-value pairs, we can use ArrayIterator for
 // the implementation of DictIterator.
 pub struct Iter<'a> {
-    array_iter: array::Iter<'a>,
+    pub(crate) array_iter: array::Iter<'a>,
 }
 
 impl<'a> Iterator for Iter<'a> {
@@ -160,5 +168,19 @@ impl<'a> IntoIterator for &'a Dict {
 
     fn into_iter(self) -> Self::IntoIter {
         self.iter()
+    }
+}
+
+impl Debug for Dict {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let mut out = "Dict {".to_string();
+        for (i, (key, value)) in self.into_iter().enumerate() {
+            out.push_str(&format!("'{}': Value {{ type: {:?} }}", key, value.value_type()));
+            if i < self.len() - 1 {
+                out.push(',');
+            }
+        }
+        out.push('}');
+        f.write_str(&out)
     }
 }

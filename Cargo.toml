@@ -8,9 +8,15 @@ codegen-units = 1
 
 [dependencies]
 thiserror = "1.0.56"
+serde = { version = "1.0.204", optional = true }
+serde_json = { version = "1.0.120", optional = true }
+
+[features]
+serde = ["dep:serde", "dep:serde_json"]
 
 [dev-dependencies]
 criterion = { version = "0.5.1" }
+serde = "1.0.204"
 
 [profile.bench]
 codegen-units = 1

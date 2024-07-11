@@ -1,6 +1,7 @@
-use super::error::{DecodeError, Result};
 use crate::value::pointer::Pointer;
 use crate::value::{varint, Value, ValueType};
+use crate::value::{DecodeError, Result};
+use std::fmt::{Debug, Formatter};
 
 #[repr(transparent)]
 pub struct Array {
@@ -17,7 +18,7 @@ impl Array {
     /// # Safety
     /// You should validate the array created with this function, otherwise it cannot be
     /// considered valid.
-    pub(super) fn from_value(value: &Value) -> &Self {
+    pub(crate) fn from_value(value: &Value) -> &Self {
         unsafe { std::mem::transmute(value) }
     }
 
@@ -28,6 +29,12 @@ impl Array {
         }
 
         Some(unsafe { self.get_unchecked(index) })
+    }
+    
+    pub fn clone_box(&self) -> Box<Array> {
+        unsafe {
+            Box::from_raw(Box::into_raw(self.value.clone_box()) as *mut Array)
+        }
     }
 
     /// Get and dereference the value at the given index without bounds checking.
@@ -168,7 +175,7 @@ impl Array {
 // Iterator
 pub struct Iter<'a> {
     pub(super) next: Option<&'a Value>,
-    pub(super) width: u8,
+    pub(crate) width: u8,
     pub(super) index: usize,
     pub(super) len: usize,
 }
@@ -217,5 +224,19 @@ impl<'a> IntoIterator for &'a Array {
 
     fn into_iter(self) -> Self::IntoIter {
         self.iter()
+    }
+}
+
+impl Debug for Array {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let mut out = "Array [".to_string();
+        for (i, elem) in self.into_iter().enumerate() {
+            out.push_str(&format!("Value {{ type: {:?} }}", elem.value_type()));
+            if i < self.len() - 1 {
+                out.push(',');
+            }
+        }
+        out.push(']');
+        f.write_str(&out)
     }
 }

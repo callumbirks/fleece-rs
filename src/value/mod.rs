@@ -2,18 +2,19 @@
 
 pub(crate) mod array;
 pub(crate) mod dict;
-mod error;
-pub(super) mod pointer;
+pub(crate) mod pointer;
 mod sized;
 pub(crate) mod varint;
+
+mod error;
 
 pub use array::Array;
 pub use dict::Dict;
 pub use sized::SizedValue;
 
-use crate::value::pointer::Pointer;
 pub use error::DecodeError;
 use error::Result;
+use pointer::Pointer;
 use std::cmp::Ordering;
 use std::fmt::{Debug, Formatter};
 
@@ -241,7 +242,13 @@ impl Value {
             ValueType::Int | ValueType::UnsignedInt => {
                 let count = (self.bytes[0] & 0x07) as usize + 1;
                 let mut buf = [0u8; 8];
-                buf.copy_from_slice(&self.bytes[1..count]);
+                unsafe {
+                    std::ptr::copy_nonoverlapping(
+                        self.bytes[1..].as_ptr(),
+                        buf.as_mut_ptr(),
+                        count,
+                    );
+                }
                 i64::from_le_bytes(buf)
             }
             ValueType::Float | ValueType::Double32 | ValueType::Double64 => self.to_double() as i64,
@@ -522,10 +529,26 @@ impl Value {
         }
     }
 
-    fn clone_box(&self) -> Box<Value> {
+    pub fn clone_box(&self) -> Box<Value> {
         let mut value_vec = Vec::with_capacity(self.len());
         value_vec.extend_from_slice(&self.bytes);
         unsafe { Box::from_raw(Box::into_raw(value_vec.into_boxed_slice()) as *mut Value) }
+    }
+
+    pub fn null() -> &'static Value {
+        unsafe { std::mem::transmute(&constants::NULL[0..2]) }
+    }
+
+    pub fn undefined() -> &'static Value {
+        unsafe { std::mem::transmute(&constants::UNDEFINED[0..2]) }
+    }
+    
+    pub fn bool(b: bool) -> &'static Value {
+        if b {
+            unsafe { std::mem::transmute(&constants::TRUE[0..2]) }
+        } else {
+            unsafe { std::mem::transmute(&constants::FALSE[0..2]) }
+        }
     }
 }
 
@@ -557,14 +580,8 @@ impl Debug for Value {
             }
             ValueType::String => out.field("val", &self.to_str()),
             ValueType::Data => out.field("val", &self.to_data()),
-            ValueType::Array => out.field(
-                "val",
-                &format!("len: {}", self.as_array().map_or(0, Array::len)),
-            ),
-            ValueType::Dict => out.field(
-                "val",
-                &format!("len: {}", self.as_dict().map_or(0, Dict::len)),
-            ),
+            ValueType::Array => out.field("val", &Array::from_value(self)),
+            ValueType::Dict => out.field("val", &Dict::from_value(self)),
             ValueType::Pointer => {
                 let pointer = Pointer::from_value(self);
                 let narrow_offset = unsafe { pointer.get_offset(false) };

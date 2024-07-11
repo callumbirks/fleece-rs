@@ -21,7 +21,7 @@ impl Pointer {
         unsafe { std::mem::transmute(value) }
     }
 
-    pub(super) fn deref_checked(&self, wide: bool, data_start: *const u8) -> Result<&Value> {
+    pub(crate) fn deref_checked(&self, wide: bool, data_start: *const u8) -> Result<&Value> {
         if (wide && self.value.bytes.len() < 4) || self.value.bytes.len() < 2 {
             return Err(DecodeError::PointerTooSmall {
                 actual: self.value.bytes.len(),
