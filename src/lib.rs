@@ -7,6 +7,7 @@ mod ser;
 #[cfg(test)]
 mod tests;
 pub mod value;
+pub mod alloced;
 
 pub use encoder::Encoder;
 pub use error::Error;

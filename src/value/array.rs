@@ -31,7 +31,7 @@ impl Array {
         Some(unsafe { self.get_unchecked(index) })
     }
     
-    pub fn clone_box(&self) -> Box<Array> {
+    pub(crate) fn clone_box(&self) -> Box<Array> {
         unsafe {
             Box::from_raw(Box::into_raw(self.value.clone_box()) as *mut Array)
         }

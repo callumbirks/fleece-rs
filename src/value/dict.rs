@@ -104,7 +104,7 @@ impl Dict {
         self.array.is_empty()
     }
 
-    pub fn clone_box(&self) -> Box<Dict> {
+    pub(crate) fn clone_box(&self) -> Box<Dict> {
         unsafe {
             Box::from_raw(Box::into_raw(self.array.value.clone_box()) as *mut Dict)
         }

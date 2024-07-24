@@ -1,8 +1,8 @@
 use crate::encoder::value_stack::{Collection, CollectionStack, DictKey};
-use crate::value;
 use crate::value::pointer::Pointer as ValuePointer;
 use crate::value::SizedValue;
 use crate::value::{pointer, ValueType};
+use crate::{value, Value};
 use error::Result;
 use std::borrow::Borrow;
 use std::cmp::Ordering;
@@ -12,6 +12,7 @@ mod encodable;
 mod error;
 mod value_stack;
 
+use crate::alloced::AllocedValue;
 pub use encodable::AsBoxedValue;
 pub use error::EncodeError;
 
@@ -23,6 +24,8 @@ pub struct UndefinedValue;
 pub trait Encodable {
     /// Write self to the given writer, encoded as Fleece. Return [`None`] if any write operations fail.
     /// Return [`Some`] with the number of bytes written if the value was written successfully.
+    /// # Errors
+    /// Any IO errors produced by the `writer`.
     fn write_fleece_to<W: Write>(&self, writer: &mut W, is_wide: bool) -> std::io::Result<usize>;
     /// The number of bytes necessary to encode this value in Fleece.
     fn fleece_size(&self) -> usize;
@@ -44,6 +47,20 @@ impl Encoder<Vec<u8>> {
     #[must_use]
     pub fn new() -> Encoder<Vec<u8>> {
         Self::default()
+    }
+
+    /// A convenience function which is the same as [`Encoder::finish`], but returns an
+    /// [`AllocedValue`].
+    #[allow(clippy::missing_panics_doc)]
+    #[must_use]
+    pub fn finish_value(self) -> AllocedValue {
+        let vec = self.finish();
+        #[cfg(not(debug_assertions))]
+        unsafe {
+            Value::from_bytes_alloced_unchecked(&vec)
+        }
+        #[cfg(debug_assertions)]
+        Value::from_bytes_alloced(&vec).unwrap()
     }
 }
 
@@ -72,7 +89,7 @@ impl<W: Write> Encoder<W> {
     }
 
     /// Write an [`Encodable`] type to the encoder. The parameter may be any borrowed form of an Encodable type.
-    /// `R: Borrow<T>` enables us to pass something like an Rc<T> directly to this function
+    /// `R: Borrow<T>` enables us to pass something like a Rc<T> directly to this function
     /// ## Errors
     /// - If there is not an open collection (Array/Dict).
     /// - If the open collection is a Dict, and it is waiting for a key.
@@ -107,7 +124,7 @@ impl<W: Write> Encoder<W> {
     /// - If the open collection is a Dict, and it is waiting for a key.
     /// - If the value is invalid Fleece.
     /// - I/O errors related to writing to this Encoder's writer.
-    pub fn write_fleece(&mut self, value: &value::Value) -> Result<()> {
+    pub fn write_fleece(&mut self, value: &Value) -> Result<()> {
         // If the encoder has no open collections and the value is not a collection, return None
         if self.collection_stack.empty()
             && value.value_type() != ValueType::Dict
@@ -156,6 +173,9 @@ impl<W: Write> Encoder<W> {
         }
     }
 
+    /// # Errors
+    /// - If the top-level collection is a Dict and is waiting for a key.
+    /// - If the top-level collection has already been closed.
     pub fn begin_array(&mut self, capacity: usize) -> Result<()> {
         if self.top_collection_closed {
             return Err(EncodeError::MultiTopLevelCollection);
@@ -186,12 +206,17 @@ impl<W: Write> Encoder<W> {
         Ok(())
     }
 
+    /// # Errors
+    /// - If the top-level collection is a Dict and is waiting for a key.
+    /// - If the top-level collection is already closed.
     pub fn begin_dict(&mut self) -> Result<()> {
-        self.collection_stack.push_dict()?;
-        Ok(())
+        if self.top_collection_closed {
+            return Err(EncodeError::CollectionNotOpen)
+        }
+        self.collection_stack.push_dict()
     }
 
-    /// This *MUST* follow the implementation at [`value::Value::dict_key_cmp`]
+    /// This *MUST* follow the implementation at [`Value::dict_key_cmp`]
     pub(crate) fn dict_key_cmp(value1: &DictKey, value2: &DictKey) -> Ordering {
         match (value1, value2) {
             // Inline strings

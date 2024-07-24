@@ -12,6 +12,7 @@ pub use array::Array;
 pub use dict::Dict;
 pub use sized::SizedValue;
 
+use crate::alloced::AllocedValue;
 pub use error::DecodeError;
 use error::Result;
 use pointer::Pointer;
@@ -132,7 +133,7 @@ impl Value {
     }
 
     /// Find and validate Fleece data in the given data. It will return a reference to the root
-    /// value. The root value will usually be a Dict.
+    /// value. The root value will usually be a [Dict].
     /// ## Errors
     /// If the data given is not valid Fleece data
     pub fn from_bytes(data: &[u8]) -> Result<&Self> {
@@ -145,7 +146,7 @@ impl Value {
         Ok(root)
     }
 
-    /// Like `from_bytes`, but doesn't do any validation, so it should only be used on data that
+    /// Like [`Value::from_bytes`], but doesn't do any validation, so it should only be used on data that
     /// you already know to be valid Fleece.
     /// If you call this on invalid Fleece data, it will probably panic.
     /// The performance uplift of this function is great, but must be used carefully.
@@ -164,6 +165,29 @@ impl Value {
             return root;
         }
         panic!("Invalid data");
+    }
+
+    /// The same as [`Value::from_bytes`], but returning an `AllocedValue`, so the caller doesn't
+    /// need to worry about keeping the original bytes in scope.
+    /// This method clones the passed in data.
+    /// # Errors
+    /// See [`Value::from_bytes`]
+    pub fn from_bytes_alloced(data: &[u8]) -> Result<AllocedValue> {
+        let mut alloced = unsafe { AllocedValue::new_dangling(data) };
+        alloced.value = std::ptr::from_ref(Value::from_bytes(&alloced.buf)?);
+        Ok(alloced)
+    }
+
+    /// The same as [`Value::from_bytes_unchecked`], but returning an `AllocedValue`, so the caller
+    /// doesn't need to worry about keeping the original bytes in scope.
+    /// This method clones the passed in data.
+    /// # Safety
+    /// See [`Value::from_bytes_unchecked`]
+    #[must_use]
+    pub unsafe fn from_bytes_alloced_unchecked(data: &[u8]) -> AllocedValue {
+        let mut alloced = unsafe { AllocedValue::new_dangling(data) };
+        alloced.value = std::ptr::from_ref(Value::from_bytes_unchecked(&alloced.buf));
+        alloced
     }
 
     // Will cause a panic if bytes is empty
@@ -529,25 +553,28 @@ impl Value {
         }
     }
 
-    pub fn clone_box(&self) -> Box<Value> {
+    pub(crate) fn clone_box(&self) -> Box<Value> {
         let mut value_vec = Vec::with_capacity(self.len());
         value_vec.extend_from_slice(&self.bytes);
         unsafe { Box::from_raw(Box::into_raw(value_vec.into_boxed_slice()) as *mut Value) }
     }
 
+    #[must_use]
     pub fn null() -> &'static Value {
         unsafe { std::mem::transmute(&constants::NULL[0..2]) }
     }
 
+    #[must_use]
     pub fn undefined() -> &'static Value {
         unsafe { std::mem::transmute(&constants::UNDEFINED[0..2]) }
     }
-    
+
+    #[must_use]
     pub fn bool(b: bool) -> &'static Value {
         if b {
-            unsafe { std::mem::transmute(&constants::TRUE[0..2]) }
+            unsafe { std::mem::transmute::<&[u8], &Value>(&constants::TRUE[0..2]) }
         } else {
-            unsafe { std::mem::transmute(&constants::FALSE[0..2]) }
+            unsafe { std::mem::transmute::<&[u8], &Value>(&constants::FALSE[0..2]) }
         }
     }
 }
