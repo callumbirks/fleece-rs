@@ -1,6 +1,6 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
-use fleece_rs::Value;
+use fleece::Value;
 
 const PERSON_ENCODED: &[u8] = include_bytes!("../1person.fleece");
 const PEOPLE_ENCODED: &[u8] = include_bytes!("../1000people.fleece");

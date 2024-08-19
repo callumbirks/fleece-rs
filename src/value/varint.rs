@@ -45,7 +45,7 @@ pub fn write(out: &mut [u8], value: u64) -> usize {
 }
 
 // The number of bytes required to write a varint with the given value
-pub fn size_required(value: u64) -> usize {
+pub const fn size_required(value: u64) -> usize {
     if value == 0 {
         1
     } else {

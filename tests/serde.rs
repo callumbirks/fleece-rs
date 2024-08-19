@@ -1,4 +1,4 @@
-use fleece_rs::{Error, error};
+use fleece::{error, Error};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Eq, PartialEq, Hash, Debug, Clone)]
@@ -95,25 +95,26 @@ fn serde() {
         },
     ];
 
-    let bytes = fleece_rs::to_bytes(&students).expect("Error serializing");
-    let de_students: Vec<Student> = fleece_rs::from_bytes(&bytes).expect("Error deserializing");
+    let bytes = fleece::to_bytes(&students).expect("Error serializing");
+    let de_students: Vec<Student> = fleece::from_bytes(&bytes).expect("Error deserializing");
 
     assert_eq!(students, de_students);
 
     let class = Class::Maths;
-    let bytes = fleece_rs::to_bytes(&class).expect("Error serializing");
-    let de_class: Class = fleece_rs::from_bytes(&bytes).expect("Error deserializing");
+    let bytes = fleece::to_bytes(&class).expect("Error serializing");
+    let de_class: Class = fleece::from_bytes(&bytes).expect("Error deserializing");
     assert_eq!(class, de_class);
 
     assert!(matches!(
-        fleece_rs::to_bytes("hihi").expect_err("Should throw `SerializeError::ValueNotCollection`"),
+        fleece::to_bytes("hihi").expect_err("Should throw `SerializeError::ValueNotCollection`"),
         Error::Serialize(error::SerializeError::ValueNotCollection)
     ));
-    
+
     assert!(matches!(
-        fleece_rs::to_bytes(MyUnitStruct).expect_err("Should throw `SerializeError::ValueNotCollection`"),
+        fleece::to_bytes(MyUnitStruct)
+            .expect_err("Should throw `SerializeError::ValueNotCollection`"),
         Error::Serialize(error::SerializeError::ValueNotCollection)
     ));
-    
-    assert!(fleece_rs::to_bytes(Class::Maths).is_ok());
+
+    assert!(fleece::to_bytes(Class::Maths).is_ok());
 }

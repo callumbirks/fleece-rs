@@ -13,10 +13,10 @@ impl SizedValue {
     /// An empty string is constructed with:
     /// `SizedValue::from_narrow([value::tag::STRING, 0])`
     ///
-    /// An unsigned short (i16) `Value` is constructed with:
+    /// An unsigned short (u16) `Value` is constructed with:
     /// ```
     /// let mut bytes = 204_u16.to_be_bytes();
-    /// let _ = fleece_rs::value::SizedValue::from_narrow(bytes);
+    /// let _ = fleece::value::SizedValue::from_narrow(bytes);
     /// ```
     #[must_use]
     pub fn from_narrow(narrow: [u8; 2]) -> Self {
