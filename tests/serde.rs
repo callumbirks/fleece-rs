@@ -59,6 +59,7 @@ struct Student {
 #[derive(Serialize, Deserialize)]
 struct MyUnitStruct;
 
+#[cfg(feature = "serde")]
 #[test]
 fn serde() {
     let students = vec![
