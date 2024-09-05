@@ -1,12 +1,12 @@
-use std::fmt::{Debug, Display};
 use crate::encoder::EncodeError;
 use crate::value::DecodeError;
+use std::fmt::Debug;
 use thiserror::Error;
 
 #[cfg(feature = "serde")]
-pub use crate::ser::SerializeError;
-#[cfg(feature = "serde")]
 pub use crate::de::DeserializeError;
+#[cfg(feature = "serde")]
+pub use crate::ser::SerializeError;
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -28,14 +28,20 @@ pub type Result<T> = core::result::Result<T, Error>;
 
 #[cfg(feature = "serde")]
 impl serde::de::Error for Error {
-    fn custom<T>(msg: T) -> Self where T: Display {
+    fn custom<T>(msg: T) -> Self
+    where
+        T: Display,
+    {
         Error::Message(msg.to_string())
     }
 }
 
 #[cfg(feature = "serde")]
 impl serde::ser::Error for Error {
-    fn custom<T>(msg: T) -> Self where T: Display {
+    fn custom<T>(msg: T) -> Self
+    where
+        T: Display,
+    {
         Error::Message(msg.to_string())
     }
 }

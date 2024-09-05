@@ -30,12 +30,6 @@ impl Array {
 
         Some(unsafe { self.get_unchecked(index) })
     }
-    
-    pub(crate) fn clone_box(&self) -> Box<Array> {
-        unsafe {
-            Box::from_raw(Box::into_raw(self.value.clone_box()) as *mut Array)
-        }
-    }
 
     /// Get and dereference the value at the given index without bounds checking.
     pub(super) unsafe fn get_unchecked(&self, index: usize) -> &Value {

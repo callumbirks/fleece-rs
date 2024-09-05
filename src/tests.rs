@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::fs::OpenOptions;
 
 use crate::encoder::Encoder;
@@ -203,4 +204,52 @@ fn decode_10_000() {
     }
 
     std::fs::remove_file("10_000people.fleece").expect("Failed to remove file");
+}
+
+#[test]
+fn shared_keys() {
+    let mut encoder = Encoder::new();
+    encoder.set_shared_keys(SharedKeys::new());
+    encoder.begin_dict().unwrap();
+    encoder.write_key("name").expect("Failed to write value!");
+    encoder.write_value("John").expect("Failed to write key!");
+    encoder
+        .write_key("Address Line 1")
+        .expect("Failed to write key!");
+    encoder
+        .write_value("3250 Olcott St")
+        .expect("Failed to write value!");
+
+    let scope = encoder.finish_scoped().expect("Failed to create Scope!");
+    let shared_keys = scope.shared_keys().expect("Scope should have shared keys!");
+    // Expect 1 shared key because "name" is short enough to be a shared key, but "Address Line 1" is not.
+    assert_eq!(shared_keys.len(), 1, "Expected 1 shared key!");
+
+    let scoped_value = scope.root().expect("Scope has no root Value!");
+
+    let dict = scoped_value.as_dict().expect("Expected root to be a Dict!");
+    let name = dict.get("name").expect("Expected key 'name'!");
+    assert_eq!(name.to_str(), "John");
+    let address = dict
+        .get("Address Line 1")
+        .expect("Expected key 'Address Line 1'!");
+    assert_eq!(address.to_str(), "3250 Olcott St");
+}
+
+#[test]
+fn shared_keys_iter() {
+    let value = Value::from_bytes(PERSON_ENCODED).unwrap();
+    let mut encoder = Encoder::new();
+    encoder.set_shared_keys(SharedKeys::new());
+    encoder.write_fleece(value).unwrap();
+    let scope = encoder.finish_scoped().unwrap();
+    let scoped_value = scope.root().unwrap();
+    let sk_dict = scoped_value.as_dict().unwrap();
+
+    let non_sk_dict = value.as_dict().unwrap();
+
+    let all_sk_keys: BTreeSet<&str> = sk_dict.into_iter().map(|(key, _)| key).collect();
+    let all_non_sk_keys: BTreeSet<&str> = non_sk_dict.into_iter().map(|(key, _)| key).collect();
+
+    assert_eq!(all_sk_keys, all_non_sk_keys);
 }

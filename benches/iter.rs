@@ -1,6 +1,6 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
-use fleece::Value;
+use fleece::{Encoder, SharedKeys, Value};
 
 const PERSON_ENCODED: &[u8] = include_bytes!("../1person.fleece");
 const PEOPLE_ENCODED: &[u8] = include_bytes!("../1000people.fleece");
@@ -29,5 +29,25 @@ fn iter_people(c: &mut Criterion) {
     });
 }
 
-criterion_group!(iter_benches, iter_person, iter_people,);
+fn iter_people_shared_keys(c: &mut Criterion) {
+    let value = Value::from_bytes(PEOPLE_ENCODED).unwrap();
+    let mut encoder = Encoder::new();
+    encoder.set_shared_keys(SharedKeys::new());
+    encoder.write_fleece(value).unwrap();
+    let scope = encoder.finish_scoped().unwrap();
+    let scoped_value = scope.root().unwrap();
+    let array = scoped_value.as_array().unwrap();
+    c.bench_function("iter_people_sharedkeys", |b| {
+        b.iter(|| {
+            assert_eq!(array.into_iter().count(), 1000);
+        });
+    });
+}
+
+criterion_group!(
+    iter_benches,
+    iter_person,
+    iter_people,
+    iter_people_shared_keys
+);
 criterion_main!(iter_benches);

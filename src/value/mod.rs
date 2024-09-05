@@ -478,6 +478,13 @@ impl Value {
                 debug_assert_ne!(val1, "", "value1 is not a pointer to a string!");
                 val1.cmp(value2.to_str())
             }
+            // SharedKeys
+            (ValueType::Short, ValueType::Short) => {
+                value1.to_unsigned_short().cmp(&value2.to_unsigned_short())
+            }
+            // SharedKeys are sorted first in the dict
+            (ValueType::Short, _) => Ordering::Less,
+            (_, ValueType::Short) => Ordering::Greater,
             _ => unreachable!(),
         }
     }
@@ -551,12 +558,6 @@ impl Value {
             let end = 1 + inline_size as usize;
             &self.bytes[1..end]
         }
-    }
-
-    pub(crate) fn clone_box(&self) -> Box<Value> {
-        let mut value_vec = Vec::with_capacity(self.len());
-        value_vec.extend_from_slice(&self.bytes);
-        unsafe { Box::from_raw(Box::into_raw(value_vec.into_boxed_slice()) as *mut Value) }
     }
 
     #[must_use]

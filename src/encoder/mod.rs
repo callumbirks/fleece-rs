@@ -1,12 +1,14 @@
 use crate::encoder::value_stack::{Collection, CollectionStack, DictKey};
+use crate::scope::Scope;
 use crate::value::pointer::Pointer as ValuePointer;
 use crate::value::SizedValue;
 use crate::value::{pointer, ValueType};
-use crate::{value, Value};
+use crate::{value, SharedKeys, Value};
 use error::Result;
 use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::io::Write;
+use std::sync::Arc;
 
 mod encodable;
 mod error;
@@ -38,6 +40,7 @@ pub trait Encodable {
 #[derive(Default)]
 pub struct Encoder<W: Write> {
     out: W,
+    shared_keys: Option<SharedKeys>,
     collection_stack: CollectionStack,
     len: usize,
     top_collection_closed: bool,
@@ -68,6 +71,7 @@ impl<W: Write> Encoder<W> {
     pub fn new_to_writer(out: W) -> Self {
         Self {
             out,
+            shared_keys: None,
             collection_stack: CollectionStack::new(),
             len: 0,
             top_collection_closed: false,
@@ -84,7 +88,8 @@ impl<W: Write> Encoder<W> {
             // Keys which are small enough are inlined.
             self._write_key_inline(val)
         } else {
-            self._write_key_pointer(key)
+            // Other keys are written either as a pointer or using SharedKeys, if available.
+            self._write_key(key)
         }
     }
 
@@ -173,6 +178,10 @@ impl<W: Write> Encoder<W> {
         }
     }
 
+    pub fn set_shared_keys(&mut self, shared_keys: SharedKeys) {
+        self.shared_keys = Some(shared_keys);
+    }
+
     /// # Errors
     /// - If the top-level collection is a Dict and is waiting for a key.
     /// - If the top-level collection has already been closed.
@@ -211,29 +220,9 @@ impl<W: Write> Encoder<W> {
     /// - If the top-level collection is already closed.
     pub fn begin_dict(&mut self) -> Result<()> {
         if self.top_collection_closed {
-            return Err(EncodeError::CollectionNotOpen)
+            return Err(EncodeError::CollectionNotOpen);
         }
         self.collection_stack.push_dict()
-    }
-
-    /// This *MUST* follow the implementation at [`Value::dict_key_cmp`]
-    pub(crate) fn dict_key_cmp(value1: &DictKey, value2: &DictKey) -> Ordering {
-        match (value1, value2) {
-            // Inline strings
-            (DictKey::Inline(value1), DictKey::Inline(value2)) => {
-                value1.as_value().to_str().cmp(value2.as_value().to_str())
-            }
-            // Pointers to strings
-            (DictKey::Pointer(val1, _), DictKey::Pointer(val2, _)) => {
-                val1.as_ref().cmp(val2.as_ref())
-            }
-            (DictKey::Inline(value1), DictKey::Pointer(val2, _)) => {
-                value1.as_value().to_str().cmp(val2.as_ref())
-            }
-            (DictKey::Pointer(val1, _), DictKey::Inline(value2)) => {
-                val1.as_ref().cmp(value2.as_value().to_str())
-            }
-        }
     }
 
     /// End the top open Dict. This will write all the Dict's keys and values to the Encoder's
@@ -269,6 +258,12 @@ impl<W: Write> Encoder<W> {
         for elem in &dict.values {
             match &elem.key {
                 DictKey::Inline(val) => self._write(val, is_wide)?,
+                DictKey::Shared(int_key) => {
+                    let Some(val) = int_key.to_sized_value() else {
+                        unreachable!()
+                    };
+                    self._write(&val, is_wide)?
+                }
                 DictKey::Pointer(_, offset) => {
                     if is_wide {
                         let Some(val) = SizedValue::new_wide_pointer(*offset) else {
@@ -297,6 +292,44 @@ impl<W: Write> Encoder<W> {
         self._end();
         self.out.flush().ok();
         self.out
+    }
+
+    /// This *MUST* follow the implementation at [`Value::dict_key_cmp`]
+    pub(crate) fn dict_key_cmp(value1: &DictKey, value2: &DictKey) -> Ordering {
+        match (value1, value2) {
+            // Inline strings
+            (DictKey::Inline(value1), DictKey::Inline(value2)) => {
+                value1.as_value().to_str().cmp(value2.as_value().to_str())
+            }
+            // Pointers to strings
+            (DictKey::Pointer(val1, _), DictKey::Pointer(val2, _)) => {
+                val1.as_ref().cmp(val2.as_ref())
+            }
+            (DictKey::Inline(value1), DictKey::Pointer(val2, _)) => {
+                value1.as_value().to_str().cmp(val2.as_ref())
+            }
+            (DictKey::Pointer(val1, _), DictKey::Inline(value2)) => {
+                val1.as_ref().cmp(value2.as_value().to_str())
+            }
+            // SharedKeys
+            (DictKey::Shared(value1), DictKey::Shared(value2)) => value1.cmp(value2),
+            // SharedKeys are sorted first in the dict
+            (DictKey::Shared(_), _) => Ordering::Less,
+            (_, DictKey::Shared(_)) => Ordering::Greater,
+        }
+    }
+}
+
+impl<W: Write> Encoder<W>
+where
+    Arc<[u8]>: From<W>,
+{
+    pub fn finish_scoped(mut self) -> Option<Arc<Scope>> {
+        self._end();
+        self.out.flush().ok();
+        let out = self.out;
+        let shared_keys = self.shared_keys.map(Arc::new);
+        Scope::new(out, shared_keys)
     }
 }
 
@@ -329,6 +362,22 @@ impl<W: Write> Encoder<W> {
         // If the key is small enough to fit in a fixed-width value, inline it
         dict.push_key(DictKey::Inline(val))
             .ok_or_else(|| EncodeError::DictWaitingForValue)
+    }
+
+    fn _write_key(&mut self, key: &str) -> Result<()> {
+        if let Some(shared_keys) = &mut self.shared_keys {
+            let Some(Collection::Dict(dict)) = self.collection_stack.top_mut() else {
+                return Err(EncodeError::DictNotOpen);
+            };
+            // If we have shared keys, insert the key into it and add the corresponding int key to the Dict
+            let Some(int_key) = shared_keys.encode_and_insert(key) else {
+                return self._write_key_pointer(key);
+            };
+            dict.push_key(DictKey::Shared(int_key))
+                .ok_or_else(|| EncodeError::DictWaitingForValue)
+        } else {
+            self._write_key_pointer(key)
+        }
     }
 
     fn _write_key_pointer(&mut self, key: &str) -> Result<()> {

@@ -17,6 +17,8 @@ pub struct Array {
 
 pub enum DictKey {
     Inline(SizedValue),
+    // SharedKeys
+    Shared(u16),
     // We keep an allocated copy of the key for sorting comparison, because the key is already written to the buffer
     Pointer(Box<str>, u32),
 }

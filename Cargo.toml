@@ -10,6 +10,11 @@ codegen-units = 1
 thiserror = "1.0.56"
 serde = { version = "1.0.204", optional = true }
 serde_json = { version = "1.0.120", optional = true }
+lazy_static = "1.5.0"
+rangemap = "1.5.1"
+crossbeam-utils = "0.8.20"
+folklore = "0.8.0"
+fixedstr = "0.5.7"
 
 [features]
 serde = ["dep:serde", "dep:serde_json"]

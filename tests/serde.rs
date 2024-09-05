@@ -1,4 +1,3 @@
-use fleece::{error, Error};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Eq, PartialEq, Hash, Debug, Clone)]
