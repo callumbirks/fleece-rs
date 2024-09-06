@@ -1,13 +1,14 @@
 use lazy_static::lazy_static;
 
 use crate::{value, Array, Dict, Value, ValueType};
+use core::fmt;
 use std::borrow::Borrow;
 use std::ops::Deref;
 use std::pin::Pin;
 use std::ptr::NonNull;
 use std::sync::Arc;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Alloced<T>
 where
     T: ?Sized,
@@ -90,6 +91,16 @@ impl AllocedDict {
             value: std::ptr::slice_from_raw_parts(EMPTY_DICT.as_ptr(), EMPTY_DICT.len())
                 as *const Dict,
         }
+    }
+}
+
+impl<T: ?Sized + fmt::Debug> fmt::Debug for Alloced<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Alloced")
+            .field("buf", &self.buf)
+            .field("value_ptr", &self.value)
+            .field("value", &self.value())
+            .finish()
     }
 }
 
