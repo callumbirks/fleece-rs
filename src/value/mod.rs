@@ -173,7 +173,8 @@ impl Value {
     /// See [`Value::from_bytes`]
     pub fn from_bytes_alloced(data: &[u8]) -> Result<AllocedValue> {
         let mut alloced = unsafe { AllocedValue::new_dangling(data) };
-        alloced.value = std::ptr::from_ref(Value::from_bytes(&alloced.buf)?);
+        let value = Value::from_bytes(&alloced.buf)?;
+        alloced.value = std::ptr::from_ref(value);
         Ok(alloced)
     }
 
@@ -185,7 +186,8 @@ impl Value {
     #[must_use]
     pub unsafe fn from_bytes_alloced_unchecked(data: &[u8]) -> AllocedValue {
         let mut alloced = unsafe { AllocedValue::new_dangling(data) };
-        alloced.value = std::ptr::from_ref(Value::from_bytes_unchecked(&alloced.buf));
+        let value = Value::from_bytes_unchecked(&alloced.buf);
+        alloced.value = std::ptr::from_ref(value);
         alloced
     }
 
