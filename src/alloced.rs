@@ -1,15 +1,18 @@
-use crate::{Array, Dict, Value, ValueType};
+use lazy_static::lazy_static;
+
+use crate::{value, Array, Dict, Value, ValueType};
 use std::borrow::Borrow;
 use std::ops::Deref;
 use std::pin::Pin;
 use std::ptr::NonNull;
+use std::sync::Arc;
 
 #[derive(Debug, Clone)]
 pub struct Alloced<T>
 where
     T: ?Sized,
 {
-    pub(crate) buf: Pin<Box<[u8]>>,
+    pub(crate) buf: Pin<Arc<[u8]>>,
     pub(crate) value: *const T,
 }
 
@@ -54,9 +57,38 @@ impl AllocedValue {
 
     pub(crate) unsafe fn new_dangling(data: &[u8]) -> Self {
         Self {
-            buf: Pin::from(data.to_vec().into_boxed_slice()),
+            buf: Pin::new(Arc::from(data.to_vec().into_boxed_slice())),
             value: std::ptr::slice_from_raw_parts(NonNull::<u8>::dangling().as_ptr(), 0)
                 as *const Value,
+        }
+    }
+}
+
+lazy_static! {
+    static ref EMPTY_ARRAY: Pin<Arc<[u8]>> = Arc::pin([value::tag::ARRAY, 0]);
+    static ref EMPTY_DICT: Pin<Arc<[u8]>> = Arc::pin([value::tag::DICT, 0]);
+}
+
+impl AllocedArray {
+    /// An empty [`AllocedArray`]. Doesn't perform any allocation because it points to a constant.
+    #[must_use]
+    pub fn empty() -> Self {
+        AllocedArray {
+            buf: EMPTY_ARRAY.clone(),
+            value: std::ptr::slice_from_raw_parts(EMPTY_ARRAY.as_ptr(), EMPTY_ARRAY.len())
+                as *const Array,
+        }
+    }
+}
+
+impl AllocedDict {
+    /// An empty [`AllocedDict`]. Doesn't perform any allocation because it points to a constant.
+    #[must_use]
+    pub fn empty() -> Self {
+        AllocedDict {
+            buf: EMPTY_DICT.clone(),
+            value: std::ptr::slice_from_raw_parts(EMPTY_DICT.as_ptr(), EMPTY_DICT.len())
+                as *const Dict,
         }
     }
 }
@@ -86,3 +118,6 @@ impl<T: ?Sized> Deref for Alloced<T> {
         self.value()
     }
 }
+
+unsafe impl<T: ?Sized> Send for Alloced<T> {}
+unsafe impl<T: ?Sized> Sync for Alloced<T> {}
