@@ -1,5 +1,5 @@
 use crate::value::pointer::Pointer;
-use crate::value::{varint, Value, ValueType};
+use crate::value::{self, varint, Value, ValueType};
 use crate::value::{DecodeError, Result};
 use std::fmt::{Debug, Formatter};
 
@@ -11,6 +11,12 @@ pub struct Array {
 pub const VARINT_COUNT: u16 = 0x07FF;
 
 impl Array {
+    #[must_use]
+    pub const fn empty() -> &'static Self {
+        const EMPTY: [u8; 2] = [value::tag::ARRAY, 0];
+        unsafe { std::mem::transmute(&EMPTY as &[u8]) }
+    }
+
     #[allow(clippy::transmute_ptr_to_ptr)]
     #[inline]
     /// Transmutes a [`Value`] to an [`Array`].

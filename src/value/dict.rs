@@ -2,7 +2,7 @@ use super::array::Array;
 use super::{array, ValueType};
 use crate::encoder::{AsBoxedValue, Encodable};
 use crate::scope::Scope;
-use crate::value::Value;
+use crate::value::{self, Value};
 use crate::SharedKeys;
 use std::borrow::Borrow;
 use std::cmp::Ordering;
@@ -17,6 +17,12 @@ pub struct Dict {
 }
 
 impl Dict {
+    #[must_use]
+    pub const fn empty() -> &'static Self {
+        const EMPTY: [u8; 2] = [value::tag::DICT, 0];
+        unsafe { std::mem::transmute(&EMPTY as &[u8]) }
+    }
+
     /// Transmutes a [`Value`] to a [`Dict`].
     /// # Safety
     /// You should validate the dict created with this function, otherwise it cannot be
