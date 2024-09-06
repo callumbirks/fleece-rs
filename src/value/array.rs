@@ -1,3 +1,4 @@
+use crate::alloced::AllocedArray;
 use crate::value::pointer::Pointer;
 use crate::value::{self, varint, Value, ValueType};
 use crate::value::{DecodeError, Result};
@@ -11,6 +12,20 @@ pub struct Array {
 pub const VARINT_COUNT: u16 = 0x07FF;
 
 impl Array {
+    pub fn from_bytes(data: &[u8]) -> Result<&Self> {
+        let value = Value::from_bytes(data)?;
+        if matches!(value.value_type(), ValueType::Array) {
+            Ok(Self::from_value(value))
+        } else {
+            Err(value::DecodeError::IsNotArray)
+        }
+    }
+
+    pub fn clone_from_bytes(data: &[u8]) -> Result<AllocedArray> {
+        let value = Value::clone_from_bytes(data)?;
+        value.to_array().ok_or(value::DecodeError::IsNotArray)
+    }
+
     #[must_use]
     pub const fn empty() -> &'static Self {
         const EMPTY: [u8; 2] = [value::tag::ARRAY, 0];

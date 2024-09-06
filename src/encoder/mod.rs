@@ -63,7 +63,7 @@ impl Encoder<Vec<u8>> {
             Value::from_bytes_alloced_unchecked(&vec)
         }
         #[cfg(debug_assertions)]
-        Value::from_bytes_alloced(&vec).unwrap()
+        Value::clone_from_bytes(&vec).unwrap()
     }
 }
 

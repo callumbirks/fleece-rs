@@ -13,6 +13,10 @@ pub enum DecodeError {
     PointerTooSmall { actual: usize, expected: usize },
     #[error("A pointer offset was 0")]
     PointerOffsetZero,
+    #[error("Value is not a dictionary")]
+    IsNotDict,
+    #[error("Value is not an array")]
+    IsNotArray,
     #[error("Pointer with offset {offset} target {target:#x} outside of source data (start: {data_start:#x})")]
     PointerTargetOutOfBounds {
         data_start: usize,

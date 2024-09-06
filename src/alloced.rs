@@ -4,15 +4,19 @@ use crate::{value, Array, Dict, Value, ValueType};
 use core::fmt;
 use std::borrow::Borrow;
 use std::ops::Deref;
+use std::pin::Pin;
 use std::ptr::NonNull;
 use std::sync::Arc;
 
+/// A [`Value`] which manages its own memory. This can be constructed with [`Value::from_bytes_alloced`].
+/// If you have an [`AllocedValue`] and need an [`AllocedArray`] or [`AllocedDict`], you can use
+/// [`AllocedValue::to_array`] or [`AllocedValue::to_dict`] respectively.
 #[derive(Clone)]
 pub struct Alloced<T>
 where
     T: ?Sized,
 {
-    pub(crate) buf: Arc<[u8]>,
+    pub(crate) buf: Pin<Arc<[u8]>>,
     pub(crate) value: *const T,
 }
 
@@ -23,8 +27,13 @@ impl<T: ?Sized> Alloced<T> {
     }
 }
 
+/// A [`Value`] which manages its own memory. This can be constructed with [`Value::clone_from_bytes`].
+/// If you have an [`AllocedValue`] and need an [`AllocedArray`] or [`AllocedDict`], you can use
+/// [`AllocedValue::to_array`] or [`AllocedValue::to_dict`] respectively.
 pub type AllocedValue = Alloced<Value>;
+/// A [`Dict`] which manages its own memory. This can be constructed with [`Dict::clone_from_bytes`].
 pub type AllocedDict = Alloced<Dict>;
+/// An [`Array`] which manages its own memory. This can be constructed with [`Array::clone_from_bytes`].
 pub type AllocedArray = Alloced<Array>;
 
 impl AllocedValue {
@@ -57,7 +66,7 @@ impl AllocedValue {
 
     pub(crate) unsafe fn new_dangling(data: &[u8]) -> Self {
         Self {
-            buf: Arc::from(data.to_vec().into_boxed_slice()),
+            buf: Pin::new(Arc::from(data.to_vec())),
             value: std::ptr::slice_from_raw_parts(NonNull::<u8>::dangling().as_ptr(), 0)
                 as *const Value,
         }
@@ -65,8 +74,8 @@ impl AllocedValue {
 }
 
 lazy_static! {
-    static ref EMPTY_ARRAY: Arc<[u8]> = Arc::new([value::tag::ARRAY, 0]);
-    static ref EMPTY_DICT: Arc<[u8]> = Arc::new([value::tag::DICT, 0]);
+    static ref EMPTY_ARRAY: Pin<Arc<[u8]>> = Arc::pin([value::tag::ARRAY, 0]);
+    static ref EMPTY_DICT: Pin<Arc<[u8]>> = Arc::pin([value::tag::DICT, 0]);
 }
 
 impl AllocedArray {

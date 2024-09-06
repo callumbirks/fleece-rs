@@ -171,7 +171,7 @@ impl Value {
     /// This method clones the passed in data.
     /// # Errors
     /// See [`Value::from_bytes`]
-    pub fn from_bytes_alloced(data: &[u8]) -> Result<AllocedValue> {
+    pub fn clone_from_bytes(data: &[u8]) -> Result<AllocedValue> {
         let mut alloced = unsafe { AllocedValue::new_dangling(data) };
         let value = Value::from_bytes(&alloced.buf)?;
         alloced.value = std::ptr::from_ref(value);
@@ -184,7 +184,7 @@ impl Value {
     /// # Safety
     /// See [`Value::from_bytes_unchecked`]
     #[must_use]
-    pub unsafe fn from_bytes_alloced_unchecked(data: &[u8]) -> AllocedValue {
+    pub unsafe fn clone_from_bytes_unchecked(data: &[u8]) -> AllocedValue {
         let mut alloced = unsafe { AllocedValue::new_dangling(data) };
         let value = Value::from_bytes_unchecked(&alloced.buf);
         alloced.value = std::ptr::from_ref(value);

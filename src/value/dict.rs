@@ -1,8 +1,9 @@
 use super::array::Array;
 use super::{array, ValueType};
+use crate::alloced::AllocedDict;
 use crate::encoder::{AsBoxedValue, Encodable};
 use crate::scope::Scope;
-use crate::value::{self, Value};
+use crate::value::{self, Result, Value};
 use crate::SharedKeys;
 use std::borrow::Borrow;
 use std::cmp::Ordering;
@@ -17,6 +18,20 @@ pub struct Dict {
 }
 
 impl Dict {
+    pub fn from_bytes(data: &[u8]) -> Result<&Self> {
+        let value = Value::from_bytes(data)?;
+        if matches!(value.value_type(), ValueType::Dict) {
+            Ok(Self::from_value(value))
+        } else {
+            Err(value::DecodeError::IsNotDict)
+        }
+    }
+
+    pub fn clone_from_bytes(data: &[u8]) -> Result<AllocedDict> {
+        let value = Value::clone_from_bytes(data)?;
+        value.to_dict().ok_or(value::DecodeError::IsNotDict)
+    }
+
     #[must_use]
     pub const fn empty() -> &'static Self {
         const EMPTY: [u8; 2] = [value::tag::DICT, 0];
