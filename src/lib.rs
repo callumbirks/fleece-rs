@@ -21,6 +21,8 @@ pub use error::Result;
 #[cfg(feature = "serde")]
 pub use ser::to_bytes;
 #[cfg(feature = "serde")]
+pub use ser::to_bytes_with_shared_keys;
+#[cfg(feature = "serde")]
 pub use ser::to_writer;
 #[cfg(feature = "serde")]
 pub use ser::Serializer;

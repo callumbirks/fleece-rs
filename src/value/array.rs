@@ -11,9 +11,8 @@ pub struct Array {
 pub const VARINT_COUNT: u16 = 0x07FF;
 
 impl Array {
-    #[allow(clippy::inline_always)]
     #[allow(clippy::transmute_ptr_to_ptr)]
-    #[inline(always)]
+    #[inline]
     /// Transmutes a [`Value`] to an [`Array`].
     /// # Safety
     /// You should validate the array created with this function, otherwise it cannot be
@@ -223,14 +222,10 @@ impl<'a> IntoIterator for &'a Array {
 
 impl Debug for Array {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let mut out = "Array [".to_string();
-        for (i, elem) in self.into_iter().enumerate() {
-            out.push_str(&format!("Value {{ type: {:?} }}", elem.value_type()));
-            if i < self.len() - 1 {
-                out.push(',');
-            }
+        let mut list = f.debug_list();
+        for elem in self {
+            list.entry(&elem);
         }
-        out.push(']');
-        f.write_str(&out)
+        list.finish()
     }
 }

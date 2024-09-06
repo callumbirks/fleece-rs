@@ -73,8 +73,7 @@ pub(crate) mod extra_flags {
 }
 
 impl ValueType {
-    #[allow(clippy::inline_always)]
-    #[inline(always)]
+    #[inline]
     #[must_use]
     pub fn from_byte(byte: u8) -> Self {
         match byte & 0xF0 {
@@ -191,8 +190,7 @@ impl Value {
     }
 
     // Will cause a panic if bytes is empty
-    #[allow(clippy::inline_always)]
-    #[inline(always)]
+    #[inline]
     #[must_use]
     pub fn value_type(&self) -> ValueType {
         ValueType::from_byte(self.bytes[0])
@@ -509,8 +507,7 @@ impl Value {
     /// Converts a pointer to a `RawValue` reference.
     /// # Safety
     /// The caller should ensure the target is a valid `RawValue`.
-    #[allow(clippy::inline_always)]
-    #[inline(always)]
+    #[inline]
     pub(super) unsafe fn _from_raw_unchecked<'a>(
         ptr: *const u8,
         available_size: usize,
@@ -521,8 +518,7 @@ impl Value {
 
     /// A convenience to offset self by `count` bytes, then transmute the result to a `RawValue`
     /// with [`Value::_from_raw_unchecked`].
-    #[allow(clippy::inline_always)]
-    #[inline(always)]
+    #[inline]
     pub(super) unsafe fn _offset_unchecked(&self, count: isize, width: u8) -> &Value {
         let target_ptr = unsafe { self.bytes.as_ptr().offset(count) };
         Value::_from_raw_unchecked(target_ptr, width as usize)
@@ -531,8 +527,7 @@ impl Value {
 
 // Underlying data getters
 impl Value {
-    #[allow(clippy::inline_always)]
-    #[inline(always)]
+    #[inline]
     fn _get_short(&self) -> u16 {
         let mut buf = [0u8; 2];
         buf.copy_from_slice(&self.bytes[0..2]);
@@ -590,26 +585,25 @@ impl Value {
 
 impl Debug for Value {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let mut tuple = f.debug_tuple(&format!("{:?}", self.value_type()));
         if self.bytes.is_empty() {
-            return write!(f, "Empty");
+            tuple.field(&"Empty");
         }
-        let mut out = f.debug_struct("Value");
-        out.field("type", &self.value_type());
         match self.value_type() {
-            ValueType::Null => out.field("val", &"Null"),
-            ValueType::Undefined => out.field("val", &"Undefined"),
-            ValueType::False => out.field("val", &"False"),
-            ValueType::True => out.field("val", &"True"),
-            ValueType::Short => out.field("val", &self.to_short()),
-            ValueType::UnsignedInt => out.field("val", &self.to_unsigned_int()),
-            ValueType::Int => out.field("val", &self.to_int()),
+            ValueType::Null => tuple.field(&"Null"),
+            ValueType::Undefined => tuple.field(&"Undefined"),
+            ValueType::False => tuple.field(&"False"),
+            ValueType::True => tuple.field(&"True"),
+            ValueType::Short => tuple.field(&self.to_short()),
+            ValueType::UnsignedInt => tuple.field(&self.to_unsigned_int()),
+            ValueType::Int => tuple.field(&self.to_int()),
             ValueType::Float | ValueType::Double32 | ValueType::Double64 => {
-                out.field("val", &self.to_double())
+                tuple.field(&self.to_double())
             }
-            ValueType::String => out.field("val", &self.to_str()),
-            ValueType::Data => out.field("val", &self.to_data()),
-            ValueType::Array => out.field("val", &Array::from_value(self)),
-            ValueType::Dict => out.field("val", &Dict::from_value(self)),
+            ValueType::String => tuple.field(&self.to_str()),
+            ValueType::Data => tuple.field(&self.to_data()),
+            ValueType::Array => tuple.field(&Array::from_value(self)),
+            ValueType::Dict => tuple.field(&Dict::from_value(self)),
             ValueType::Pointer => {
                 let pointer = Pointer::from_value(self);
                 let narrow_offset = unsafe { pointer.get_offset(false) };
@@ -618,13 +612,12 @@ impl Debug for Value {
                 } else {
                     0
                 };
-                out.field(
-                    "val",
-                    &format!("Pointer {{ if narrow: -{narrow_offset}, if wide: -{wide_offset} }}"),
-                )
+                tuple.field(&format!(
+                    "{{ if narrow: -{narrow_offset}, if wide: -{wide_offset} }}"
+                ))
             }
         };
-        out.finish()
+        tuple.finish()
     }
 }
 

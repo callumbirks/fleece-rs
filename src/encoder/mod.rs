@@ -15,7 +15,7 @@ mod error;
 mod value_stack;
 
 use crate::alloced::AllocedValue;
-pub use encodable::AsBoxedValue;
+pub(crate) use encodable::AsBoxedValue;
 pub use error::EncodeError;
 
 pub struct NullValue;
@@ -324,7 +324,7 @@ impl<W: Write> Encoder<W>
 where
     Arc<[u8]>: From<W>,
 {
-    pub fn finish_scoped(mut self) -> Option<Arc<Scope>> {
+    pub fn finish_scoped(mut self) -> Arc<Scope> {
         self._end();
         self.out.flush().ok();
         let out = self.out;

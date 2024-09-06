@@ -30,7 +30,7 @@ pub type Result<T> = core::result::Result<T, Error>;
 impl serde::de::Error for Error {
     fn custom<T>(msg: T) -> Self
     where
-        T: Display,
+        T: std::fmt::Display,
     {
         Error::Message(msg.to_string())
     }
@@ -40,7 +40,7 @@ impl serde::de::Error for Error {
 impl serde::ser::Error for Error {
     fn custom<T>(msg: T) -> Self
     where
-        T: Display,
+        T: std::fmt::Display,
     {
         Error::Message(msg.to_string())
     }

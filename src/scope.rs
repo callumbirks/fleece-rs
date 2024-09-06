@@ -81,7 +81,7 @@ impl Scope {
     pub(crate) fn new(
         data: impl Into<Arc<[u8]>>,
         shared_keys: Option<Arc<SharedKeys>>,
-    ) -> Option<Arc<Self>> {
+    ) -> Arc<Self> {
         let mut scope_map = SCOPE_MAP.write().unwrap();
         let strong_data = data.into();
         let weak_data = Arc::downgrade(&strong_data);
@@ -99,7 +99,7 @@ impl Scope {
         });
 
         scope_map.insert(start..end, ScopeEntry(Arc::downgrade(&scope)));
-        Some(scope)
+        scope
     }
 
     #[inline]

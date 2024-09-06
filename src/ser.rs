@@ -1,8 +1,11 @@
 use serde::ser;
 use serde::ser::{Impossible, SerializeMap, SerializeSeq, SerializeTuple};
 
+use std::sync::Arc;
+
 use crate::encoder::{EncodeError, NullValue, UndefinedValue};
-use crate::Encoder;
+use crate::scope::Scope;
+use crate::{Encoder, SharedKeys};
 use crate::{Error, Result};
 
 pub struct Serializer<W>
@@ -24,6 +27,29 @@ where
     T: ser::Serialize,
 {
     to_writer(vec![], value)
+}
+
+/// Serialize the given value into Fleece, using [`SharedKeys`].
+/// Return the encoded bytes wrapped in a globally-retained [`Scope`].
+/// The `value` parameter must be an enum, sequence, map or non-unit struct.
+/// Maps must have string (or char) keys.
+/// # Errors
+/// - Map keys which are not Strings.
+/// - If the `value` is not some sort of enum, sequence, map or non-unit struct.
+pub fn to_bytes_with_shared_keys<T>(value: T) -> Result<Arc<Scope>>
+where
+    T: ser::Serialize,
+{
+    let writer = vec![];
+    let mut serializer = Serializer::new_to_writer(writer);
+    serializer.set_shared_keys(SharedKeys::new());
+    match value.serialize(&mut serializer) {
+        Ok(()) => Ok(serializer.encoder.finish_scoped()),
+        Err(Error::Encode(EncodeError::CollectionNotOpen)) => {
+            Err(Error::Serialize(SerializeError::ValueNotCollection))
+        }
+        Err(other) => Err(other),
+    }
 }
 
 /// Serialize the given value into Fleece, and write the encoded bytes into the given writer.
@@ -56,14 +82,6 @@ pub enum SerializeError {
     ValueNotCollection,
 }
 
-impl Serializer<Vec<u8>> {
-    fn new() -> Self {
-        Self {
-            encoder: Encoder::new(),
-        }
-    }
-}
-
 impl<W> Serializer<W>
 where
     W: std::io::Write,
@@ -72,6 +90,10 @@ where
         Self {
             encoder: Encoder::new_to_writer(writer),
         }
+    }
+
+    fn set_shared_keys(&mut self, shared_keys: SharedKeys) {
+        self.encoder.set_shared_keys(shared_keys);
     }
 }
 
@@ -149,9 +171,7 @@ where
     }
 
     fn serialize_none(self) -> Result<Self::Ok> {
-        self.encoder
-            .write_value(&NullValue)
-            .map_err(Error::Encode)
+        self.encoder.write_value(&NullValue).map_err(Error::Encode)
     }
 
     fn serialize_some<T>(self, value: &T) -> Result<Self::Ok>
@@ -179,9 +199,7 @@ where
         variant: &'static str,
     ) -> Result<Self::Ok> {
         self.encoder.begin_array(1).map_err(Error::Encode)?;
-        self.encoder
-            .write_value(variant)
-            .map_err(Error::Encode)?;
+        self.encoder.write_value(variant).map_err(Error::Encode)?;
         self.encoder.end_array().map_err(Error::Encode)
     }
 
@@ -203,10 +221,8 @@ where
     where
         T: ?Sized + ser::Serialize,
     {
-        self.encoder.begin_array(3).map_err(Error::Encode)?;
-        self.encoder
-            .write_value(variant)
-            .map_err(Error::Encode)?;
+        self.encoder.begin_array(2).map_err(Error::Encode)?;
+        self.encoder.write_value(variant).map_err(Error::Encode)?;
         ser::Serialize::serialize(value, &mut *self)?;
         self.encoder.end_array().map_err(Error::Encode)
     }
@@ -239,9 +255,7 @@ where
         len: usize,
     ) -> Result<Self::SerializeTupleVariant> {
         self.encoder.begin_array(3)?;
-        self.encoder
-            .write_value(variant)
-            .map_err(Error::Encode)?;
+        self.encoder.write_value(variant).map_err(Error::Encode)?;
         self.encoder.begin_array(len)?;
         Ok(self)
     }
@@ -264,12 +278,8 @@ where
         variant: &'static str,
         len: usize,
     ) -> Result<Self::SerializeStructVariant> {
-        self.encoder
-            .begin_array(len + 2)
-            .map_err(Error::Encode)?;
-        self.encoder
-            .write_value(variant)
-            .map_err(Error::Encode)?;
+        self.encoder.begin_array(len + 2).map_err(Error::Encode)?;
+        self.encoder.write_value(variant).map_err(Error::Encode)?;
         self.encoder.begin_dict().map_err(Error::Encode)?;
         Ok(self)
     }
@@ -341,51 +351,35 @@ where
     }
 
     fn serialize_i8(self, _: i8) -> Result<Self::Ok> {
-        Err(Error::Serialize(SerializeError::KeyNotString(
-            KeyType::Int,
-        )))
+        Err(Error::Serialize(SerializeError::KeyNotString(KeyType::Int)))
     }
 
     fn serialize_i16(self, _: i16) -> Result<Self::Ok> {
-        Err(Error::Serialize(SerializeError::KeyNotString(
-            KeyType::Int,
-        )))
+        Err(Error::Serialize(SerializeError::KeyNotString(KeyType::Int)))
     }
 
     fn serialize_i32(self, _: i32) -> Result<Self::Ok> {
-        Err(Error::Serialize(SerializeError::KeyNotString(
-            KeyType::Int,
-        )))
+        Err(Error::Serialize(SerializeError::KeyNotString(KeyType::Int)))
     }
 
     fn serialize_i64(self, _: i64) -> Result<Self::Ok> {
-        Err(Error::Serialize(SerializeError::KeyNotString(
-            KeyType::Int,
-        )))
+        Err(Error::Serialize(SerializeError::KeyNotString(KeyType::Int)))
     }
 
     fn serialize_u8(self, _: u8) -> Result<Self::Ok> {
-        Err(Error::Serialize(SerializeError::KeyNotString(
-            KeyType::Int,
-        )))
+        Err(Error::Serialize(SerializeError::KeyNotString(KeyType::Int)))
     }
 
     fn serialize_u16(self, _: u16) -> Result<Self::Ok> {
-        Err(Error::Serialize(SerializeError::KeyNotString(
-            KeyType::Int,
-        )))
+        Err(Error::Serialize(SerializeError::KeyNotString(KeyType::Int)))
     }
 
     fn serialize_u32(self, _: u32) -> Result<Self::Ok> {
-        Err(Error::Serialize(SerializeError::KeyNotString(
-            KeyType::Int,
-        )))
+        Err(Error::Serialize(SerializeError::KeyNotString(KeyType::Int)))
     }
 
     fn serialize_u64(self, _: u64) -> Result<Self::Ok> {
-        Err(Error::Serialize(SerializeError::KeyNotString(
-            KeyType::Int,
-        )))
+        Err(Error::Serialize(SerializeError::KeyNotString(KeyType::Int)))
     }
 
     fn serialize_f32(self, _: f32) -> Result<Self::Ok> {
@@ -508,9 +502,7 @@ where
     }
 
     fn serialize_map(self, _len: Option<usize>) -> Result<Self::SerializeMap> {
-        Err(Error::Serialize(SerializeError::KeyNotString(
-            KeyType::Map,
-        )))
+        Err(Error::Serialize(SerializeError::KeyNotString(KeyType::Map)))
     }
 
     fn serialize_struct(self, _name: &'static str, _len: usize) -> Result<Self::SerializeStruct> {

@@ -17,6 +17,7 @@ folklore = "0.8.0"
 fixedstr = "0.5.7"
 
 [features]
+defaults = ["serde"]
 serde = ["dep:serde", "dep:serde_json"]
 
 [dev-dependencies]

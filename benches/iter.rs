@@ -34,7 +34,7 @@ fn iter_people_shared_keys(c: &mut Criterion) {
     let mut encoder = Encoder::new();
     encoder.set_shared_keys(SharedKeys::new());
     encoder.write_fleece(value).unwrap();
-    let scope = encoder.finish_scoped().unwrap();
+    let scope = encoder.finish_scoped();
     let scoped_value = scope.root().unwrap();
     let array = scoped_value.as_array().unwrap();
     c.bench_function("iter_people_sharedkeys", |b| {

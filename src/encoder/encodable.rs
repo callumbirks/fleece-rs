@@ -160,29 +160,29 @@ impl Encodable for i16 {
 
 impl Encodable for u8 {
     fn write_fleece_to<W: Write>(&self, writer: &mut W, is_wide: bool) -> Result<usize> {
-        (*self as u16).write_fleece_to(writer, is_wide)
+        (u16::from(*self)).write_fleece_to(writer, is_wide)
     }
 
     fn fleece_size(&self) -> usize {
-        (*self as u16).fleece_size()
+        (u16::from(*self)).fleece_size()
     }
 
     fn to_sized_value(&self) -> Option<SizedValue> {
-        (*self as u16).to_sized_value()
+        (u16::from(*self)).to_sized_value()
     }
 }
 
 impl Encodable for i8 {
     fn write_fleece_to<W: Write>(&self, writer: &mut W, is_wide: bool) -> Result<usize> {
-        (*self as i16).write_fleece_to(writer, is_wide)
+        (i16::from(*self)).write_fleece_to(writer, is_wide)
     }
 
     fn fleece_size(&self) -> usize {
-        (*self as i16).fleece_size()
+        (i16::from(*self)).fleece_size()
     }
 
     fn to_sized_value(&self) -> Option<SizedValue> {
-        (*self as i16).to_sized_value()
+        (i16::from(*self)).to_sized_value()
     }
 }
 
@@ -493,7 +493,7 @@ impl Encodable for value_stack::Dict {
     }
 }
 
-pub trait AsBoxedValue {
+pub(crate) trait AsBoxedValue {
     /// Encode `self` into Fleece and Box the resulting `Value`, returning it.
     fn as_boxed_value(&self) -> Result<Box<Value>>;
 }

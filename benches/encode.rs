@@ -22,7 +22,7 @@ fn encode_people_sharedkeys(c: &mut Criterion) {
             let mut encoder = Encoder::new();
             encoder.set_shared_keys(SharedKeys::new());
             encoder.write_fleece(value).unwrap();
-            let _ = encoder.finish_scoped().unwrap();
+            let _ = encoder.finish_scoped();
         });
     });
 }

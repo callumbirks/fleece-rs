@@ -25,7 +25,7 @@ pub type AllocedDict = Alloced<Dict>;
 pub type AllocedArray = Alloced<Array>;
 
 impl AllocedValue {
-    /// Convert this to an [`AllocedArray`]. Returns `None` if the inner [`Value`] is not an 
+    /// Convert this to an [`AllocedArray`]. Returns `None` if the inner [`Value`] is not an
     /// [`Array`].
     #[must_use]
     pub fn to_array(self) -> Option<AllocedArray> {

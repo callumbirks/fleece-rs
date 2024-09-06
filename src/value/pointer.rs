@@ -14,9 +14,8 @@ pub const MAX_NARROW: u16 = 0x3fff;
 pub const MAX_WIDE: u32 = 0x3fff_ffff;
 
 impl Pointer {
-    #[allow(clippy::inline_always)]
     #[allow(clippy::transmute_ptr_to_ptr)]
-    #[inline(always)]
+    #[inline]
     pub fn from_value(value: &Value) -> &Self {
         unsafe { std::mem::transmute(value) }
     }
@@ -35,6 +34,7 @@ impl Pointer {
         }
 
         // First get the pointer given by offset, so we can validate before de-referencing
+        #[allow(clippy::cast_possible_wrap)]
         let target_ptr = unsafe { self.offset(-(offset as isize)) };
 
         // Is this pointer external to the source data?
@@ -76,14 +76,12 @@ impl Pointer {
         target
     }
 
-    #[allow(clippy::inline_always)]
-    #[inline(always)]
+    #[inline]
     unsafe fn offset(&self, offset: isize) -> *const u8 {
         self.value.bytes.as_ptr().offset(offset)
     }
 
-    #[allow(clippy::inline_always)]
-    #[inline(always)]
+    #[inline]
     pub unsafe fn get_offset(&self, wide: bool) -> u32 {
         if wide {
             let mut buf = [0u8; 4];

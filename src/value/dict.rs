@@ -1,6 +1,6 @@
 use super::array::Array;
 use super::{array, ValueType};
-use crate::encoder::AsBoxedValue;
+use crate::encoder::{AsBoxedValue, Encodable};
 use crate::scope::Scope;
 use crate::value::Value;
 use crate::SharedKeys;
@@ -27,6 +27,7 @@ impl Dict {
         unsafe { std::mem::transmute(value) }
     }
 
+    /// Returns true if this dict contains the given key.
     pub fn contains_key<R>(&self, key: &R) -> bool
     where
         R: ?Sized + Borrow<str>,
@@ -34,12 +35,39 @@ impl Dict {
         self.get(key).is_some()
     }
 
+    /// The same as [`Dict::contains_key`], but may be more efficient as the caller provides
+    /// [`SharedKeys`], rather than the Dict needing to search for them.
+    pub fn contains_key_with_shared_keys<R>(&self, key: &R, shared_keys: &SharedKeys) -> bool
+    where
+        R: ?Sized + Borrow<str>,
+    {
+        self.get_with_shared_keys(key, shared_keys).is_some()
+    }
+
+    /// Get the value in this Dict which corresponds to the given key.
     pub fn get<R>(&self, key: &R) -> Option<&Value>
     where
         R: ?Sized + Borrow<str>,
     {
-        let key: Box<Value> = self.encode_key(key.borrow())?;
+        let key: Box<Value> = self.encode_key(key.borrow(), None)?;
 
+        self._get(&key)
+    }
+
+    /// The same as [`Dict::get`], but may be more efficient as the caller provides
+    /// [`SharedKeys`] rather than the Dict needing to find them.
+    pub fn get_with_shared_keys<R>(&self, key: &R, shared_keys: &SharedKeys) -> Option<&Value>
+    where
+        R: ?Sized + Borrow<str>,
+    {
+        let key: Box<Value> = self.encode_key(key.borrow(), Some(shared_keys))?;
+
+        self._get(&key)
+    }
+
+    /// Get the value in this Dict which corresponds to the given encoded key. The key should be
+    /// encoded using [`Dict::encode_key`].
+    fn _get(&self, key: &Value) -> Option<&Value> {
         // We use binary search to find the key. This is possible because the dict keys are sorted.
         // This binary search implementation is borrowed from https://doc.rust-lang.org/std/vec/struct.Vec.html#method.binary_search_by
 
@@ -54,7 +82,7 @@ impl Dict {
             // coupled with the `left + size <= self.len()` invariant means
             // we have `left + size/2 < self.len()`, and this is in-bounds.
             let elem = unsafe { self._get_unchecked(mid) };
-            let cmp = Value::dict_key_cmp(&key, elem.0, self.is_wide());
+            let cmp = Value::dict_key_cmp(key, elem.0, self.is_wide());
 
             // This control flow produces conditional moves, which results in
             // fewer branches and instructions than if/else or matching on
@@ -115,11 +143,17 @@ impl Dict {
         (key, val)
     }
 
-    /// Encode a key to a shared key (and convert it to a Value) if SharedKeys can be found for this dict.
+    /// Encode a key to a shared key (and convert it to a Value) if [`SharedKeys`] can be found for this dict.
     /// Otherwise, just convert the key to a Value.
-    fn encode_key(&self, key: &str) -> Option<Box<Value>> {
-        if self.uses_shared_keys() {
-            if let Some(shared_keys) = self.find_shared_keys() {
+    /// Shared Keys can be provided if the caller already has them, otherwise this function
+    /// will attempt to locate relevant shared keys.
+    fn encode_key(&self, key: &str, shared_keys: Option<&SharedKeys>) -> Option<Box<Value>> {
+        if key.fleece_size() > 2 && self.uses_shared_keys() {
+            if let Some(shared_keys) = shared_keys {
+                if let Some(encoded) = shared_keys.encode(key) {
+                    return encoded.as_boxed_value().ok();
+                }
+            } else if let Some(shared_keys) = self.find_shared_keys() {
                 if let Some(encoded) = shared_keys.encode(key) {
                     return encoded.as_boxed_value().ok();
                 }
@@ -134,7 +168,7 @@ impl Dict {
     }
 
     fn uses_shared_keys(&self) -> bool {
-        if self.len() == 0 {
+        if self.is_empty() {
             return false;
         }
 
@@ -176,7 +210,7 @@ impl<'a> Iterator for SharedKeyIter<'a> {
         let key = match key.value_type() {
             ValueType::Short => {
                 let key = key.to_unsigned_short();
-                Some(unsafe { &*(self.shared_keys.decode(key)? as *const str) })
+                Some(unsafe { &*std::ptr::from_ref::<str>(self.shared_keys.decode(key)?) })
             }
             _ => Some(key.to_str()),
         }?;
@@ -229,18 +263,10 @@ impl<'a> IntoIterator for &'a Dict {
 
 impl Debug for Dict {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let mut out = "Dict {".to_string();
-        for (i, (key, value)) in self.into_iter().enumerate() {
-            out.push_str(&format!(
-                "'{}': Value {{ type: {:?} }}",
-                key,
-                value.value_type()
-            ));
-            if i < self.len() - 1 {
-                out.push(',');
-            }
+        let mut map = f.debug_map();
+        for (key, value) in self {
+            map.entry(&key, &value);
         }
-        out.push('}');
-        f.write_str(&out)
+        map.finish()
     }
 }

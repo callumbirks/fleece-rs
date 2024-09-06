@@ -220,7 +220,7 @@ fn shared_keys() {
         .write_value("3250 Olcott St")
         .expect("Failed to write value!");
 
-    let scope = encoder.finish_scoped().expect("Failed to create Scope!");
+    let scope = encoder.finish_scoped();
     let shared_keys = scope.shared_keys().expect("Scope should have shared keys!");
     // Expect 1 shared key because "name" is short enough to be a shared key, but "Address Line 1" is not.
     assert_eq!(shared_keys.len(), 1, "Expected 1 shared key!");
@@ -242,7 +242,7 @@ fn shared_keys_iter() {
     let mut encoder = Encoder::new();
     encoder.set_shared_keys(SharedKeys::new());
     encoder.write_fleece(value).unwrap();
-    let scope = encoder.finish_scoped().unwrap();
+    let scope = encoder.finish_scoped();
     let scoped_value = scope.root().unwrap();
     let sk_dict = scoped_value.as_dict().unwrap();
 
