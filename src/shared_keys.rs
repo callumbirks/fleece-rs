@@ -1,3 +1,4 @@
+use core::fmt;
 use std::io::Write;
 
 use fixedstr::zstr;
@@ -103,6 +104,10 @@ impl SharedKeys {
         }
         encoder.end_array().ok()
     }
+
+    pub fn iter(&self) -> <&Self as IntoIterator>::IntoIter {
+        self.into_iter()
+    }
 }
 
 impl Default for SharedKeys {
@@ -116,5 +121,31 @@ impl Clone for SharedKeys {
     #[inline]
     fn clone(&self) -> Self {
         Self(self.0.clone())
+    }
+}
+
+impl<'sk> IntoIterator for &'sk SharedKeys {
+    type Item = (&'sk str, u16);
+    type IntoIter = Iter<'sk>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        Iter(self.0.into_iter())
+    }
+}
+
+pub struct Iter<'a>(folklore::Iter<'a, zstr<16>, u16>);
+
+impl<'sk> Iterator for Iter<'sk> {
+    type Item = (&'sk str, u16);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next().map(|(key, value)| (key.as_str(), value))
+    }
+}
+
+impl fmt::Debug for SharedKeys {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("SharedKeys ")?;
+        f.debug_map().entries(self).finish()
     }
 }

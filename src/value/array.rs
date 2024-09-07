@@ -3,7 +3,6 @@ use crate::scope::Scope;
 use crate::value::pointer::Pointer;
 use crate::value::{self, varint, Value, ValueType};
 use crate::value::{DecodeError, Result};
-use crate::SharedKeys;
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
