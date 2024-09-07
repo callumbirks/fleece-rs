@@ -8,25 +8,13 @@ use crossbeam_utils::sync::ShardedLock;
 use lazy_static::lazy_static;
 use rangemap::RangeMap;
 
-use crate::{SharedKeys, Value};
+use crate::{alloced::AllocedValue, SharedKeys, Value};
 
 pub struct Scope {
     shared_keys: Option<Arc<SharedKeys>>,
     weak_data: Weak<[u8]>,
     strong_data: Option<Arc<[u8]>>,
     root: Option<NonNull<Value>>,
-}
-
-pub struct ScopedValue {
-    _data: Arc<[u8]>,
-    value: NonNull<Value>,
-}
-
-impl ScopedValue {
-    #[inline]
-    pub fn value(&self) -> &Value {
-        unsafe { self.value.as_ref() }
-    }
 }
 
 impl Scope {
@@ -51,11 +39,11 @@ impl Scope {
     }
 
     /// The root [`Value`] contained in the data retained by this scope. Returns [`None`] if the data has been deallocated.
-    pub fn root(&self) -> Option<ScopedValue> {
+    pub fn root(&self) -> Option<AllocedValue> {
         self.data().and_then(|data| {
-            self.root.map(|root| ScopedValue {
-                _data: data,
-                value: root,
+            self.root.map(|root| AllocedValue {
+                buf: data,
+                value: root.as_ptr(),
             })
         })
     }
@@ -127,15 +115,6 @@ impl PartialEq for Scope {
 }
 
 impl Eq for Scope {}
-
-impl Deref for ScopedValue {
-    type Target = Value;
-
-    #[inline]
-    fn deref(&self) -> &Self::Target {
-        self.value()
-    }
-}
 
 #[derive(Clone)]
 struct ScopeEntry(Weak<Scope>);

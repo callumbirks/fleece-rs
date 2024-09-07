@@ -4,7 +4,6 @@ use crate::{value, Array, Dict, Value, ValueType};
 use core::fmt;
 use std::borrow::Borrow;
 use std::ops::Deref;
-use std::pin::Pin;
 use std::ptr::NonNull;
 use std::sync::Arc;
 
@@ -16,7 +15,7 @@ pub struct Alloced<T>
 where
     T: ?Sized,
 {
-    pub(crate) buf: Pin<Arc<[u8]>>,
+    pub(crate) buf: Arc<[u8]>,
     pub(crate) value: *const T,
 }
 
@@ -66,7 +65,7 @@ impl AllocedValue {
 
     pub(crate) unsafe fn new_dangling(data: &[u8]) -> Self {
         Self {
-            buf: Pin::new(Arc::from(data.to_vec())),
+            buf: Arc::from(data.to_vec()),
             value: std::ptr::slice_from_raw_parts(NonNull::<u8>::dangling().as_ptr(), 0)
                 as *const Value,
         }
@@ -74,8 +73,8 @@ impl AllocedValue {
 }
 
 lazy_static! {
-    static ref EMPTY_ARRAY: Pin<Arc<[u8]>> = Arc::pin([value::tag::ARRAY, 0]);
-    static ref EMPTY_DICT: Pin<Arc<[u8]>> = Arc::pin([value::tag::DICT, 0]);
+    static ref EMPTY_ARRAY: Arc<[u8]> = Arc::new([value::tag::ARRAY, 0]);
+    static ref EMPTY_DICT: Arc<[u8]> = Arc::new([value::tag::DICT, 0]);
 }
 
 impl AllocedArray {

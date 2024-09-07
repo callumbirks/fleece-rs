@@ -132,7 +132,7 @@ impl Value {
     }
 
     /// Find and validate Fleece data in the given data. It will return a reference to the root
-    /// value. The root value will usually be a [Dict].
+    /// value (which lies within the given data).
     /// ## Errors
     /// If the data given is not valid Fleece data
     pub fn from_bytes(data: &[u8]) -> Result<&Self> {

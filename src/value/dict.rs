@@ -1,6 +1,6 @@
 use super::array::Array;
-use super::{array, ValueType};
-use crate::alloced::AllocedDict;
+use super::{array, DecodeError, ValueType};
+use crate::alloced::{AllocedDict, AllocedValue};
 use crate::encoder::{AsBoxedValue, Encodable};
 use crate::scope::Scope;
 use crate::value::{self, Result, Value};
@@ -18,6 +18,12 @@ pub struct Dict {
 }
 
 impl Dict {
+    /// Read Fleece-encoded data from a byte slice. If it is valid Fleece data,
+    /// and a dict, return a reference to it.
+    /// See [`Value::from_bytes`] for more information.
+    /// # Errors
+    /// - Errors from [`Value::from_bytes`]
+    /// - If the value is not a dict
     pub fn from_bytes(data: &[u8]) -> Result<&Self> {
         let value = Value::from_bytes(data)?;
         if matches!(value.value_type(), ValueType::Dict) {
@@ -27,9 +33,31 @@ impl Dict {
         }
     }
 
+    /// Similar to [`Dict::from_bytes`], but clones the data into a new [`AllocedDict`].
+    /// # Errors
+    /// - Errors from [`Value::from_bytes`]
+    /// - If the value is not a dict
     pub fn clone_from_bytes(data: &[u8]) -> Result<AllocedDict> {
         let value = Value::clone_from_bytes(data)?;
         value.to_dict().ok_or(value::DecodeError::IsNotDict)
+    }
+
+    /// Similar to [`Dict::from_bytes`], but clones the data into a new managed [`Scope`].
+    /// The caller can provide [`SharedKeys`] to be used for decoding. These will be kept allocated
+    /// inside the scope.
+    /// The scope is globally retained, and the dict which was parsed from the scope will be returned.
+    /// # Errors
+    /// - Errors from [`Value::from_bytes`]
+    /// - If the value is not a dict
+    pub fn scoped_from<T: Into<Arc<[u8]>>>(
+        data: T,
+        shared_keys: Option<Arc<SharedKeys>>,
+    ) -> Result<AllocedDict> {
+        let scope = Scope::new(data, shared_keys);
+        scope
+            .root()
+            .and_then(AllocedValue::to_dict)
+            .ok_or(DecodeError::IsNotDict)
     }
 
     #[must_use]

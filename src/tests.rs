@@ -258,6 +258,6 @@ fn shared_keys_iter() {
 fn alloced_value() {
     let value = Value::clone_from_bytes(PERSON_ENCODED).unwrap();
     decode_person_checks(&value);
-    let arc = std::pin::Pin::into_inner(value.buf);
-    assert_eq!(Arc::strong_count(&arc), 1);
+    // Sanity check
+    assert_eq!(Arc::strong_count(&value.buf), 1);
 }

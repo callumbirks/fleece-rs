@@ -1,8 +1,11 @@
-use crate::alloced::AllocedArray;
+use crate::alloced::{AllocedArray, AllocedValue};
+use crate::scope::Scope;
 use crate::value::pointer::Pointer;
 use crate::value::{self, varint, Value, ValueType};
 use crate::value::{DecodeError, Result};
+use crate::SharedKeys;
 use std::fmt::{Debug, Formatter};
+use std::sync::Arc;
 
 #[repr(transparent)]
 pub struct Array {
@@ -12,6 +15,12 @@ pub struct Array {
 pub const VARINT_COUNT: u16 = 0x07FF;
 
 impl Array {
+    /// Read Fleece-encoded data from a byte slice. If it is valid Fleece data,
+    /// and an array, return a reference to it.
+    /// See [`Value::from_bytes`] for more information.
+    /// # Errors
+    /// - Errors from [`Value::from_bytes`]
+    /// - If the value is not an array
     pub fn from_bytes(data: &[u8]) -> Result<&Self> {
         let value = Value::from_bytes(data)?;
         if matches!(value.value_type(), ValueType::Array) {
@@ -21,9 +30,31 @@ impl Array {
         }
     }
 
+    /// Similar to [`Array::from_bytes`], but clones the data into a new [`AllocedArray`].
+    /// # Errors
+    /// - Errors from [`Value::from_bytes`]
+    /// - If the value is not an array
     pub fn clone_from_bytes(data: &[u8]) -> Result<AllocedArray> {
         let value = Value::clone_from_bytes(data)?;
         value.to_array().ok_or(value::DecodeError::IsNotArray)
+    }
+
+    /// Similar to [`Array::from_bytes`], but clones the data into a new managed [`Scope`].
+    /// The caller can provide [`SharedKeys`] to be used for decoding. These will be kept allocated
+    /// inside the scope.
+    /// The scope is globally retained, and the array which was parsed from the scope will be returned.
+    /// # Errors
+    /// - Errors from [`Value::from_bytes`]
+    /// - If the value is not an array
+    pub fn scoped_from<T: Into<Arc<[u8]>>>(
+        data: T,
+        shared_keys: Option<Arc<SharedKeys>>,
+    ) -> Result<AllocedArray> {
+        let scope = Scope::new(data, shared_keys);
+        scope
+            .root()
+            .and_then(AllocedValue::to_array)
+            .ok_or(DecodeError::IsNotArray)
     }
 
     #[must_use]
