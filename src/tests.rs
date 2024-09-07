@@ -1,8 +1,8 @@
-use std::collections::BTreeSet;
-use std::fs::OpenOptions;
-
 use crate::encoder::Encoder;
 use crate::value::{varint, ValueType};
+use std::collections::BTreeSet;
+use std::fs::OpenOptions;
+use std::sync::Arc;
 
 use super::*;
 
@@ -252,4 +252,12 @@ fn shared_keys_iter() {
     let all_non_sk_keys: BTreeSet<&str> = non_sk_dict.into_iter().map(|(key, _)| key).collect();
 
     assert_eq!(all_sk_keys, all_non_sk_keys);
+}
+
+#[test]
+fn alloced_value() {
+    let value = Value::clone_from_bytes(PERSON_ENCODED).unwrap();
+    decode_person_checks(&value);
+    let arc = std::pin::Pin::into_inner(value.buf);
+    assert_eq!(Arc::strong_count(&arc), 1);
 }
