@@ -40,17 +40,12 @@ impl Array {
     }
 
     /// Similar to [`Array::from_bytes`], but clones the data into a new managed [`Scope`].
-    /// The caller can provide [`SharedKeys`] to be used for decoding. These will be kept allocated
-    /// inside the scope.
     /// The scope is globally retained, and the array which was parsed from the scope will be returned.
     /// # Errors
     /// - Errors from [`Value::from_bytes`]
     /// - If the value is not an array
-    pub fn scoped_from<T: Into<Arc<[u8]>>>(
-        data: T,
-        shared_keys: Option<Arc<SharedKeys>>,
-    ) -> Result<AllocedArray> {
-        let scope = Scope::new(data, shared_keys);
+    pub fn scoped_from<T: Into<Arc<[u8]>>>(data: T) -> Result<AllocedArray> {
+        let scope = Scope::new(data, None);
         scope
             .root()
             .and_then(AllocedValue::to_array)
