@@ -42,24 +42,6 @@ impl Dict {
         value.to_dict().ok_or(value::DecodeError::IsNotDict)
     }
 
-    /// Similar to [`Dict::from_bytes`], but clones the data into a new managed [`Scope`].
-    /// The caller can provide [`SharedKeys`] to be used for decoding. These will be kept allocated
-    /// inside the scope.
-    /// The scope is globally retained, and the dict which was parsed from the scope will be returned.
-    /// # Errors
-    /// - Errors from [`Value::from_bytes`]
-    /// - If the value is not a dict
-    pub fn scoped_from<T: Into<Arc<[u8]>>>(
-        data: T,
-        shared_keys: Option<Arc<SharedKeys>>,
-    ) -> Result<AllocedDict> {
-        let scope = Scope::new(data, shared_keys);
-        scope
-            .root()
-            .and_then(AllocedValue::to_dict)
-            .ok_or(DecodeError::IsNotDict)
-    }
-
     #[must_use]
     pub const fn empty() -> &'static Self {
         const EMPTY: [u8; 2] = [value::tag::DICT, 0];
