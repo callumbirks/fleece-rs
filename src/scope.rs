@@ -66,11 +66,8 @@ impl Scope {
         }
     }
 
-    /// Create a new scope which retains the data it is given ownership of, and optionally retains the given [`SharedKeys`], which should be relevant to the data.
-    pub(crate) fn new(
-        data: impl Into<Arc<[u8]>>,
-        shared_keys: Option<Arc<SharedKeys>>,
-    ) -> Arc<Self> {
+    /// Create a new scope which retains the data it is given ownership of, and optionally retains the given [`SharedKeys`].
+    pub fn new(data: impl Into<Arc<[u8]>>, shared_keys: Option<Arc<SharedKeys>>) -> Arc<Self> {
         let mut scope_map = SCOPE_MAP.write().unwrap();
         let strong_data = data.into();
         let weak_data = Arc::downgrade(&strong_data);
@@ -96,7 +93,7 @@ impl Scope {
         Value::from_bytes(data).map(NonNull::from).ok()
     }
 
-    fn containing(data: *const u8) -> Option<Arc<Self>> {
+    pub fn containing(data: *const u8) -> Option<Arc<Self>> {
         let scope_map = SCOPE_MAP.read().unwrap();
         let entry = scope_map.get(&(data as usize))?;
         entry.upgrade()
