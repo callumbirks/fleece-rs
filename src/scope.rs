@@ -10,6 +10,7 @@ use rangemap::RangeMap;
 
 use crate::{alloced::AllocedValue, SharedKeys, Value};
 
+#[derive(Debug)]
 pub struct Scope {
     shared_keys: Option<Arc<SharedKeys>>,
     weak_data: Weak<[u8]>,
