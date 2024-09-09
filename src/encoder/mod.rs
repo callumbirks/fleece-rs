@@ -60,7 +60,7 @@ impl Encoder<Vec<u8>> {
         let vec = self.finish();
         #[cfg(not(debug_assertions))]
         unsafe {
-            Value::from_bytes_alloced_unchecked(&vec)
+            Value::clone_from_bytes_unchecked(&vec)
         }
         #[cfg(debug_assertions)]
         Value::clone_from_bytes(&vec).unwrap()
