@@ -18,6 +18,7 @@ pub use de::Deserializer;
 pub use encoder::Encoder;
 pub use error::Error;
 pub use error::Result;
+pub use scope::Scope;
 #[cfg(feature = "serde")]
 pub use ser::to_bytes;
 #[cfg(feature = "serde")]
