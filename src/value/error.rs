@@ -1,39 +1,64 @@
+use core::fmt;
+
 use crate::value::ValueType;
-use thiserror::Error;
 
-pub type Result<T> = std::result::Result<T, DecodeError>;
+pub type Result<T> = core::result::Result<T, DecodeError>;
 
-#[derive(Debug, Error)]
+#[derive(Debug)]
 pub enum DecodeError {
-    #[error("Incorrectly sized input data")]
     InputIncorrectlySized,
-    #[error("Root value is not a pointer")]
     RootNotPointer,
-    #[error("Pointer expected to be {expected} bytes, but was {actual} bytes")]
-    PointerTooSmall { actual: usize, expected: usize },
-    #[error("A pointer offset was 0")]
+    PointerTooSmall {
+        actual: usize,
+        expected: usize,
+    },
     PointerOffsetZero,
-    #[error("Value is not a dictionary")]
     IsNotDict,
-    #[error("Value is not an array")]
     IsNotArray,
-    #[error("Pointer with offset {offset} target {target:#x} outside of source data (start: {data_start:#x})")]
     PointerTargetOutOfBounds {
         data_start: usize,
         target: usize,
         offset: u32,
     },
-    #[error("Array with width {width} and {count} elements exceeded the available {available_size} bytes")]
     ArrayOutOfBounds {
         count: usize,
         width: usize,
         available_size: usize,
-        bytes: Box<[u8]>,
     },
-    #[error("Value with type {value_type:?} which requires {required_size} bytes exceeded the available {available_size} bytes")]
     ValueOutOfBounds {
         value_type: ValueType,
         required_size: usize,
         available_size: usize,
     },
+}
+
+impl fmt::Display for DecodeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            DecodeError::InputIncorrectlySized => write!(f, "Incorrectly sized input data"),
+            DecodeError::RootNotPointer => write!(f, "Root value is not a pointer"),
+            DecodeError::PointerTooSmall { actual, expected } => write!(
+                f,
+                "Pointer expected to be {expected} bytes, but was {actual} bytes"
+            ),
+            DecodeError::PointerOffsetZero => write!(f, "Pointer offset of 0"),
+            DecodeError::IsNotDict => write!(f, "Value is not a dictionary"),
+            DecodeError::IsNotArray => write!(f, "Value is not an array"),
+            DecodeError::PointerTargetOutOfBounds {
+                data_start,
+                target,
+                offset,
+            } => write!(f, "Pointer with offset {offset} target {target:#x} outside of source data (start: {data_start:#x})"),
+            DecodeError::ArrayOutOfBounds {
+                count,
+                width,
+                available_size,
+            } => write!(f, "Array with width {width} and {count} elements exceeded the available {available_size} bytes"),
+            DecodeError::ValueOutOfBounds {
+                value_type,
+                required_size,
+                available_size,
+            } => write!(f, "Value with type {value_type:?} which requires {required_size} bytes exceeded the available {available_size} bytes"),
+        }
+    }
 }

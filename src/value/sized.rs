@@ -31,7 +31,7 @@ impl SizedValue {
     }
 
     pub(crate) fn as_value(&self) -> &Value {
-        unsafe { std::mem::transmute(&self.bytes as &[u8]) }
+        unsafe { core::mem::transmute(&self.bytes as &[u8]) }
     }
 
     pub(crate) fn as_bytes(&self) -> &[u8; 4] {

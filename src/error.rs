@@ -1,27 +1,65 @@
 use crate::encoder::EncodeError;
 use crate::value::DecodeError;
-use std::fmt::Debug;
-use thiserror::Error;
+use alloc::string::String;
+use core::fmt;
 
 #[cfg(feature = "serde")]
 pub use crate::de::DeserializeError;
 #[cfg(feature = "serde")]
 pub use crate::ser::SerializeError;
 
-#[derive(Error, Debug)]
+#[derive(Debug)]
 pub enum Error {
-    #[error("Encode {0}")]
-    Encode(#[from] EncodeError),
-    #[error("Decode {0}")]
-    Decode(#[from] DecodeError),
-    #[error("{0}")]
+    Encode(EncodeError),
+    Decode(DecodeError),
     Message(String),
     #[cfg(feature = "serde")]
-    #[error("Serialize {0}")]
-    Serialize(#[from] SerializeError),
+    Serialize(SerializeError),
     #[cfg(feature = "serde")]
-    #[error("Deserialize")]
-    Deserialize(#[from] DeserializeError),
+    Deserialize(DeserializeError),
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Error::Encode(e) => write!(f, "Encode {e}"),
+            Error::Decode(e) => write!(f, "Decode {e}"),
+            Error::Message(m) => write!(f, "{m}"),
+            #[cfg(feature = "serde")]
+            Error::Serialize(e) => write!(f, "Serialize {e}"),
+            #[cfg(feature = "serde")]
+            Error::Deserialize(e) => write!(f, "Deserialize {e}"),
+        }
+    }
+}
+
+#[cfg(feature = "serde")]
+impl serde::ser::StdError for Error {}
+
+impl From<EncodeError> for Error {
+    fn from(value: EncodeError) -> Self {
+        Error::Encode(value)
+    }
+}
+
+impl From<DecodeError> for Error {
+    fn from(value: DecodeError) -> Self {
+        Error::Decode(value)
+    }
+}
+
+#[cfg(feature = "serde")]
+impl From<SerializeError> for Error {
+    fn from(value: SerializeError) -> Self {
+        Error::Serialize(value)
+    }
+}
+
+#[cfg(feature = "serde")]
+impl From<DeserializeError> for Error {
+    fn from(value: DeserializeError) -> Self {
+        Error::Deserialize(value)
+    }
 }
 
 pub type Result<T> = core::result::Result<T, Error>;
@@ -30,7 +68,7 @@ pub type Result<T> = core::result::Result<T, Error>;
 impl serde::de::Error for Error {
     fn custom<T>(msg: T) -> Self
     where
-        T: std::fmt::Display,
+        T: fmt::Display,
     {
         Error::Message(msg.to_string())
     }
@@ -40,7 +78,7 @@ impl serde::de::Error for Error {
 impl serde::ser::Error for Error {
     fn custom<T>(msg: T) -> Self
     where
-        T: std::fmt::Display,
+        T: fmt::Display,
     {
         Error::Message(msg.to_string())
     }

@@ -1,7 +1,6 @@
 use super::error::Result;
 use super::{Value, ValueType};
 use crate::value::error::DecodeError;
-use std::ptr;
 
 /// Internally identical to `RawValue`, this is just used to separate out some functionality.
 #[repr(transparent)]
@@ -17,7 +16,7 @@ impl Pointer {
     #[allow(clippy::transmute_ptr_to_ptr)]
     #[inline]
     pub fn from_value(value: &Value) -> &Self {
-        unsafe { std::mem::transmute(value) }
+        unsafe { core::mem::transmute(value) }
     }
 
     pub(crate) fn deref_checked(&self, wide: bool, data_start: *const u8) -> Result<&Value> {
@@ -85,11 +84,11 @@ impl Pointer {
     pub unsafe fn get_offset(&self, wide: bool) -> u32 {
         if wide {
             let mut buf = [0u8; 4];
-            ptr::copy_nonoverlapping(self.value.bytes.as_ptr(), buf.as_mut_ptr(), 4);
+            core::ptr::copy_nonoverlapping(self.value.bytes.as_ptr(), buf.as_mut_ptr(), 4);
             (u32::from_be_bytes(buf) & !0xC000_0000) * 2
         } else {
             let mut buf = [0u8; 2];
-            ptr::copy_nonoverlapping(self.value.bytes.as_ptr(), buf.as_mut_ptr(), 2);
+            core::ptr::copy_nonoverlapping(self.value.bytes.as_ptr(), buf.as_mut_ptr(), 2);
             u32::from((u16::from_be_bytes(buf) & !0xC000) * 2)
         }
     }

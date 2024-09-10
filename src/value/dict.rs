@@ -1,15 +1,16 @@
+use alloc::{boxed::Box, sync::Arc};
+use core::borrow::Borrow;
+use core::cmp::Ordering;
+use core::fmt;
+use core::ops::Index;
+
 use super::array::Array;
-use super::{array, DecodeError, ValueType};
-use crate::alloced::{AllocedDict, AllocedValue};
+use super::{array, ValueType};
+use crate::alloced::AllocedDict;
 use crate::encoder::{AsBoxedValue, Encodable};
 use crate::scope::Scope;
 use crate::value::{self, Result, Value};
 use crate::SharedKeys;
-use std::borrow::Borrow;
-use std::cmp::Ordering;
-use std::fmt::{Debug, Formatter};
-use std::ops::Index;
-use std::sync::Arc;
 
 // A Dict is just an Array, but the elements are alternating key, value
 #[repr(transparent)]
@@ -45,7 +46,7 @@ impl Dict {
     #[must_use]
     pub const fn empty() -> &'static Self {
         const EMPTY: [u8; 2] = [value::tag::DICT, 0];
-        unsafe { std::mem::transmute(&EMPTY as &[u8]) }
+        unsafe { core::mem::transmute(&EMPTY as &[u8]) }
     }
 
     /// Transmutes a [`Value`] to a [`Dict`].
@@ -55,7 +56,7 @@ impl Dict {
     #[allow(clippy::transmute_ptr_to_ptr)]
     #[inline]
     pub(crate) fn from_value(value: &Value) -> &Self {
-        unsafe { std::mem::transmute(value) }
+        unsafe { core::mem::transmute(value) }
     }
 
     /// Returns true if this dict contains the given key.
@@ -241,7 +242,7 @@ impl<'a> Iterator for SharedKeyIter<'a> {
         let key = match key.value_type() {
             ValueType::Short => {
                 let key = key.to_unsigned_short();
-                Some(unsafe { &*std::ptr::from_ref::<str>(self.shared_keys.decode(key)?) })
+                Some(unsafe { &*core::ptr::from_ref::<str>(self.shared_keys.decode(key)?) })
             }
             _ => Some(key.to_str()),
         }?;
@@ -292,8 +293,8 @@ impl<'a> IntoIterator for &'a Dict {
     }
 }
 
-impl Debug for Dict {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+impl fmt::Debug for Dict {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut map = f.debug_map();
         for (key, value) in self {
             map.entry(&key, &value);

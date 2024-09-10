@@ -1,3 +1,8 @@
+#![cfg_attr(not(any(feature = "std", test)), no_std)]
+
+#[macro_use]
+extern crate alloc;
+
 pub mod alloced;
 #[cfg(feature = "serde")]
 mod de;
@@ -23,8 +28,6 @@ pub use scope::Scope;
 pub use ser::to_bytes;
 #[cfg(feature = "serde")]
 pub use ser::to_bytes_with_shared_keys;
-#[cfg(feature = "serde")]
-pub use ser::to_writer;
 #[cfg(feature = "serde")]
 pub use ser::Serializer;
 pub use shared_keys::SharedKeys;

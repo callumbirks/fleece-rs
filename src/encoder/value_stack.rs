@@ -1,6 +1,8 @@
 use crate::encoder::error::EncodeError;
 use crate::value::SizedValue;
 
+use alloc::{boxed::Box, vec::Vec};
+
 #[derive(Default)]
 pub struct CollectionStack {
     collections: Vec<Collection>,

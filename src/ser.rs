@@ -1,18 +1,16 @@
+use alloc::sync::Arc;
+use core::fmt;
+
 use serde::ser;
 use serde::ser::{Impossible, SerializeMap, SerializeSeq, SerializeTuple};
-
-use std::sync::Arc;
 
 use crate::encoder::{EncodeError, NullValue, UndefinedValue};
 use crate::scope::Scope;
 use crate::{Encoder, SharedKeys};
 use crate::{Error, Result};
 
-pub struct Serializer<W>
-where
-    W: std::io::Write,
-{
-    encoder: Encoder<W>,
+pub struct Serializer {
+    encoder: Encoder,
 }
 
 /// Serialize the given value into Fleece, and return the encoded
@@ -26,11 +24,18 @@ pub fn to_bytes<T>(value: T) -> Result<Vec<u8>>
 where
     T: ser::Serialize,
 {
-    to_writer(vec![], value)
+    let mut serializer = Serializer::new();
+    match value.serialize(&mut serializer) {
+        Ok(()) => Ok(serializer.encoder.finish()),
+        Err(Error::Encode(EncodeError::CollectionNotOpen)) => {
+            Err(Error::Serialize(SerializeError::ValueNotCollection))
+        }
+        Err(other) => Err(other),
+    }
 }
 
 /// Serialize the given value into Fleece, using [`SharedKeys`].
-/// Return the encoded bytes wrapped in a globally-retained [`Scope`].
+/// Return the encoded bytes wrapped in a [`Scope`].
 /// The `value` parameter must be an enum, sequence, map or non-unit struct.
 /// Maps must have string (or char) keys.
 /// # Errors
@@ -40,8 +45,7 @@ pub fn to_bytes_with_shared_keys<T>(value: T) -> Result<Arc<Scope>>
 where
     T: ser::Serialize,
 {
-    let writer = vec![];
-    let mut serializer = Serializer::new_to_writer(writer);
+    let mut serializer = Serializer::new();
     serializer.set_shared_keys(SharedKeys::new());
     match value.serialize(&mut serializer) {
         Ok(()) => Ok(serializer.encoder.finish_scoped()),
@@ -52,43 +56,30 @@ where
     }
 }
 
-/// Serialize the given value into Fleece, and write the encoded bytes into the given writer.
-/// The `value` parameter must be an enum, sequence, map or non-unit struct.
-/// Maps must have string (or char) keys.
-/// # Errors
-/// - Map keys which are not Strings.
-/// - If the `value` is not some sort of enum, sequence, map or non-unit struct.
-/// - I/O errors produced by the `writer`.
-pub fn to_writer<W, T>(writer: W, value: T) -> Result<W>
-where
-    T: ser::Serialize,
-    W: std::io::Write,
-{
-    let mut serializer = Serializer::new_to_writer(writer);
-    match value.serialize(&mut serializer) {
-        Ok(()) => Ok(serializer.encoder.finish()),
-        Err(Error::Encode(EncodeError::CollectionNotOpen)) => {
-            Err(Error::Serialize(SerializeError::ValueNotCollection))
-        }
-        Err(other) => Err(other),
-    }
-}
-
-#[derive(thiserror::Error, Debug)]
+#[derive(Debug)]
 pub enum SerializeError {
-    #[error("Map keys must be a String, found {0:?}")]
     KeyNotString(KeyType),
-    #[error("The value parameter should be an enum, sequence, map or non-unit struct")]
     ValueNotCollection,
 }
 
-impl<W> Serializer<W>
-where
-    W: std::io::Write,
-{
-    fn new_to_writer(writer: W) -> Self {
+impl fmt::Display for SerializeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SerializeError::KeyNotString(key_type) => {
+                write!(f, "Map keys must be a String, found {key_type:?}")
+            }
+            SerializeError::ValueNotCollection => write!(
+                f,
+                "The value parameter must be an enum, sequence, map or non-unit struct"
+            ),
+        }
+    }
+}
+
+impl Serializer {
+    fn new() -> Self {
         Self {
-            encoder: Encoder::new_to_writer(writer),
+            encoder: Encoder::new(),
         }
     }
 
@@ -97,10 +88,7 @@ where
     }
 }
 
-impl<'ser, W> serde::Serializer for &'ser mut Serializer<W>
-where
-    W: std::io::Write,
-{
+impl<'ser> serde::Serializer for &'ser mut Serializer {
     type Ok = ();
     type Error = Error;
     type SerializeSeq = Self;
@@ -289,10 +277,7 @@ where
     }
 }
 
-impl<'ser, W> SerializeSeq for &'ser mut Serializer<W>
-where
-    W: std::io::Write,
-{
+impl<'ser> SerializeSeq for &'ser mut Serializer {
     type Ok = ();
     type Error = Error;
 
@@ -323,17 +308,11 @@ pub enum KeyType {
     Map,
 }
 
-struct MapKeySerializer<'ser, W>
-where
-    W: std::io::Write,
-{
-    ser: &'ser mut Serializer<W>,
+struct MapKeySerializer<'ser> {
+    ser: &'ser mut Serializer,
 }
 
-impl<'ser, W> serde::Serializer for MapKeySerializer<'ser, W>
-where
-    W: std::io::Write,
-{
+impl<'ser> serde::Serializer for MapKeySerializer<'ser> {
     type Ok = ();
     type Error = Error;
     type SerializeSeq = Impossible<(), Error>;
@@ -524,10 +503,7 @@ where
     }
 }
 
-impl<'ser, W> SerializeMap for &'ser mut Serializer<W>
-where
-    W: std::io::Write,
-{
+impl<'ser> SerializeMap for &'ser mut Serializer {
     type Ok = ();
     type Error = Error;
 
@@ -550,10 +526,7 @@ where
     }
 }
 
-impl<'ser, W> SerializeTuple for &'ser mut Serializer<W>
-where
-    W: std::io::Write,
-{
+impl<'ser> SerializeTuple for &'ser mut Serializer {
     type Ok = ();
     type Error = Error;
 
@@ -569,10 +542,7 @@ where
     }
 }
 
-impl<'ser, W> ser::SerializeTupleStruct for &'ser mut Serializer<W>
-where
-    W: std::io::Write,
-{
+impl<'ser> ser::SerializeTupleStruct for &'ser mut Serializer {
     type Ok = ();
     type Error = Error;
 
@@ -588,10 +558,7 @@ where
     }
 }
 
-impl<'ser, W> ser::SerializeTupleVariant for &'ser mut Serializer<W>
-where
-    W: std::io::Write,
-{
+impl<'ser> ser::SerializeTupleVariant for &'ser mut Serializer {
     type Ok = ();
     type Error = Error;
 
@@ -608,10 +575,7 @@ where
     }
 }
 
-impl<'ser, W> ser::SerializeStruct for &'ser mut Serializer<W>
-where
-    W: std::io::Write,
-{
+impl<'ser> ser::SerializeStruct for &'ser mut Serializer {
     type Ok = ();
     type Error = Error;
 
@@ -628,10 +592,7 @@ where
     }
 }
 
-impl<'ser, W> ser::SerializeStructVariant for &'ser mut Serializer<W>
-where
-    W: std::io::Write,
-{
+impl<'ser> ser::SerializeStructVariant for &'ser mut Serializer {
     type Ok = ();
     type Error = Error;
 

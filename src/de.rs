@@ -1,10 +1,12 @@
+use alloc::sync::Arc;
+use core::fmt;
+
 use crate::scope::Scope;
 use crate::value::array;
 use crate::value::pointer::Pointer;
 use crate::{Array, Dict, Error, Result, SharedKeys, Value, ValueType};
 use serde::de::{DeserializeSeed, Visitor};
 use serde::{de, forward_to_deserialize_any};
-use std::sync::Arc;
 
 pub struct Deserializer<'value, 'sk> {
     value: &'value Value,
@@ -49,22 +51,35 @@ where
     T::deserialize(&deserializer)
 }
 
-#[derive(thiserror::Error, Debug)]
+#[derive(Debug)]
 pub enum DeserializeError {
-    #[error("Cannot deserialize pointer")]
-    CannotDeserializePointer,
-    #[error("Attempted to deserialize a sequence from a non-Array")]
     NotArray,
-    #[error("Attempted to deserialize a map from a non-Dict")]
     NotDict,
-    #[error("Invalid Enum, expected Array, found {0:?}")]
     InvalidEnumType(ValueType),
-    #[error("Found a Dict Key without Value!")]
     KeyWithoutValue,
-    #[error("Invalid layout for Enum / Variant {1:?} for '{0}'")]
-    InvalidEnumLayout(&'static str, String),
-    #[error("Failed to decode SharedKeys")]
+    InvalidEnumLayout(String),
     CannotDecodeSharedKeys,
+}
+
+impl fmt::Display for DeserializeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            DeserializeError::NotArray => {
+                write!(f, "Attempted to deserialize a sequence from a non-Array")
+            }
+            DeserializeError::NotDict => {
+                write!(f, "Attempted to deserialize a map from a non-Dict")
+            }
+            DeserializeError::InvalidEnumType(value_type) => {
+                write!(f, "Invalid Enum, expected Array, found {value_type:?}")
+            }
+            DeserializeError::KeyWithoutValue => write!(f, "Found a Dict Key without Value!"),
+            DeserializeError::InvalidEnumLayout(layout) => {
+                write!(f, "Invalid layout for Enum / Variant {layout:?}")
+            }
+            DeserializeError::CannotDecodeSharedKeys => write!(f, "Failed to decode SharedKeys"),
+        }
+    }
 }
 
 impl<'value, 'sk> Deserializer<'value, 'sk> {
@@ -140,9 +155,9 @@ impl<'de, 'value, 'sk> de::Deserializer<'de> for &Deserializer<'value, 'sk> {
                 Dict::from_value(self.value),
                 self.shared_keys.as_ref(),
             )),
-            ValueType::Pointer => Err(Error::Deserialize(
-                DeserializeError::CannotDeserializePointer,
-            )),
+            ValueType::Pointer => {
+                unreachable!("A Pointer Value should not reach into `deserialize_any`!")
+            }
         }
     }
 
@@ -332,7 +347,6 @@ impl<'arr, 'sk, 'de> de::EnumAccess<'de> for EnumAccess<'arr, 'sk> {
             self.array
                 .get(0)
                 .ok_or(Error::Deserialize(DeserializeError::InvalidEnumLayout(
-                    "variant seed",
                     format!("{:?}", self.array),
                 )))?;
 
@@ -354,7 +368,6 @@ impl<'arr, 'sk, 'de> de::VariantAccess<'de> for EnumAccess<'arr, 'sk> {
             Ok(())
         } else {
             Err(Error::Deserialize(DeserializeError::InvalidEnumLayout(
-                "unit variant",
                 format!("{:?}", self.array),
             )))
         }
@@ -369,7 +382,6 @@ impl<'arr, 'sk, 'de> de::VariantAccess<'de> for EnumAccess<'arr, 'sk> {
             self.array
                 .get(1)
                 .ok_or(Error::Deserialize(DeserializeError::InvalidEnumLayout(
-                    "newtype variant",
                     format!("{:?}", self.array),
                 )))?;
         seed.deserialize(&Deserializer::new(
@@ -388,7 +400,6 @@ impl<'arr, 'sk, 'de> de::VariantAccess<'de> for EnumAccess<'arr, 'sk> {
             self.array
                 .get(1)
                 .ok_or(Error::Deserialize(DeserializeError::InvalidEnumLayout(
-                    "tuple variant (no array)",
                     format!("{:?}", self.array),
                 )))?;
         if let Some(array) = inner.as_array() {
@@ -400,7 +411,6 @@ impl<'arr, 'sk, 'de> de::VariantAccess<'de> for EnumAccess<'arr, 'sk> {
             }
         }
         Err(Error::Deserialize(DeserializeError::InvalidEnumLayout(
-            "tuple variant (invalid array)",
             format!("{:?}", self.array),
         )))
     }
@@ -414,7 +424,6 @@ impl<'arr, 'sk, 'de> de::VariantAccess<'de> for EnumAccess<'arr, 'sk> {
             self.array
                 .get(1)
                 .ok_or(Error::Deserialize(DeserializeError::InvalidEnumLayout(
-                    "struct variant (no array)",
                     format!("{:?}", self.array),
                 )))?;
         if let Some(dict) = inner.as_dict() {
@@ -436,7 +445,6 @@ impl<'arr, 'sk, 'de> de::VariantAccess<'de> for EnumAccess<'arr, 'sk> {
             }
         }
         Err(Error::Deserialize(DeserializeError::InvalidEnumLayout(
-            "struct variant (invalid dict)",
             format!("{:?}", self.array),
         )))
     }

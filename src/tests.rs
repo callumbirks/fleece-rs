@@ -2,6 +2,7 @@ use crate::encoder::Encoder;
 use crate::value::{varint, ValueType};
 use std::collections::BTreeSet;
 use std::fs::OpenOptions;
+use std::io::Write;
 use std::sync::Arc;
 
 use super::*;
@@ -120,27 +121,6 @@ fn encode_people() {
 }
 
 #[test]
-fn write_to_file() {
-    let original = Value::from_bytes(PEOPLE_ENCODED).expect("Failed to decode Fleece");
-    let file = OpenOptions::new()
-        .write(true)
-        .truncate(true)
-        .create(true)
-        .open("test_1000people.fleece")
-        .expect("Failed to open file");
-    let mut encoder = Encoder::new_to_writer(file);
-    encoder
-        .write_fleece(original)
-        .expect("Failed to write Fleece!");
-    encoder.finish();
-
-    let file_bytes = std::fs::read("test_1000people.fleece").expect("Failed to read file");
-    let result = Value::from_bytes(&file_bytes).expect("Failed to decode value");
-    decode_people_checks(result);
-    std::fs::remove_file("test_1000people.fleece").ok();
-}
-
-#[test]
 fn encoder_multiple_top_level_collections() {
     let mut encoder = Encoder::new();
     encoder.begin_array(1).unwrap();
@@ -154,13 +134,7 @@ fn encoder_multiple_top_level_collections() {
 
 fn write_10_000() {
     let original = Value::from_bytes(PEOPLE_ENCODED).unwrap();
-    let file = OpenOptions::new()
-        .write(true)
-        .truncate(true)
-        .create(true)
-        .open("10_000people.fleece")
-        .unwrap();
-    let mut encoder = Encoder::new_to_writer(file);
+    let mut encoder = Encoder::new();
     let array = original.as_array().unwrap();
     encoder.begin_array(10_000).unwrap();
     for _ in 0..10 {
@@ -169,7 +143,14 @@ fn write_10_000() {
         }
     }
     encoder.end_array().unwrap();
-    encoder.finish();
+    let vec = encoder.finish();
+    let mut file = OpenOptions::new()
+        .write(true)
+        .truncate(true)
+        .create(true)
+        .open("10_000people.fleece")
+        .unwrap();
+    file.write_all(&vec).unwrap();
 }
 
 // A larger read/write test which should catch any bugs related to wide arrays / pointers.

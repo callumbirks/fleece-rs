@@ -1,10 +1,9 @@
-use crate::alloced::{AllocedArray, AllocedValue};
-use crate::scope::Scope;
+use core::fmt;
+
+use crate::alloced::AllocedArray;
 use crate::value::pointer::Pointer;
 use crate::value::{self, varint, Value, ValueType};
 use crate::value::{DecodeError, Result};
-use std::fmt::{Debug, Formatter};
-use std::sync::Arc;
 
 #[repr(transparent)]
 pub struct Array {
@@ -41,7 +40,7 @@ impl Array {
     #[must_use]
     pub const fn empty() -> &'static Self {
         const EMPTY: [u8; 2] = [value::tag::ARRAY, 0];
-        unsafe { std::mem::transmute(&EMPTY as &[u8]) }
+        unsafe { core::mem::transmute(&EMPTY as &[u8]) }
     }
 
     #[allow(clippy::transmute_ptr_to_ptr)]
@@ -51,7 +50,7 @@ impl Array {
     /// You should validate the array created with this function, otherwise it cannot be
     /// considered valid.
     pub(crate) fn from_value(value: &Value) -> &Self {
-        unsafe { std::mem::transmute(value) }
+        unsafe { core::mem::transmute(value) }
     }
 
     #[must_use]
@@ -182,7 +181,6 @@ impl Array {
                 count: elem_count,
                 width,
                 available_size,
-                bytes: Box::from(&self.value.bytes[0..available_size]),
             });
         }
 
@@ -253,8 +251,8 @@ impl<'a> IntoIterator for &'a Array {
     }
 }
 
-impl Debug for Array {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+impl fmt::Debug for Array {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut list = f.debug_list();
         for elem in self {
             list.entry(&elem);

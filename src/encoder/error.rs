@@ -1,26 +1,35 @@
-use thiserror::Error;
+use core::fmt;
 
-pub type Result<T> = std::result::Result<T, EncodeError>;
+pub type Result<T> = core::result::Result<T, EncodeError>;
 
-#[derive(Debug, Error)]
+#[derive(Debug)]
 pub enum EncodeError {
-    #[error("No open array")]
     ArrayNotOpen,
-    #[error("No open dictionary")]
     DictNotOpen,
-    #[error("Cannot write another key until the previous key has a value written to it")]
     DictWaitingForValue,
-    #[error("Cannot write a value until a key has been written")]
     DictWaitingForKey,
-    #[error("No open collection to write value to")]
     CollectionNotOpen,
-    #[error("IOError while writing value")]
-    Io {
-        #[from]
-        source: std::io::Error,
-    },
-    #[error("Value Pointer too large to be encoded")]
     PointerTooLarge,
-    #[error("Multiple top level collections are not allowed")]
     MultiTopLevelCollection,
+}
+
+impl fmt::Display for EncodeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            EncodeError::ArrayNotOpen => write!(f, "No open array"),
+            EncodeError::DictNotOpen => write!(f, "No open dictionary"),
+            EncodeError::DictWaitingForValue => write!(
+                f,
+                "Cannot write another key until the previous key has a value written to it"
+            ),
+            EncodeError::DictWaitingForKey => {
+                write!(f, "Cannot write a value until a key has been written")
+            }
+            EncodeError::CollectionNotOpen => write!(f, "No open collection to write a value to"),
+            EncodeError::PointerTooLarge => write!(f, "Value Pointer too large to be encoded"),
+            EncodeError::MultiTopLevelCollection => {
+                write!(f, "Multiple top level collections are not allowed")
+            }
+        }
+    }
 }

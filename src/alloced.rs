@@ -1,11 +1,8 @@
 use lazy_static::lazy_static;
 
 use crate::{value, Array, Dict, Value, ValueType};
-use core::fmt;
-use std::borrow::Borrow;
-use std::ops::Deref;
-use std::ptr::NonNull;
-use std::sync::Arc;
+use alloc::sync::Arc;
+use core::{borrow::Borrow, fmt, ops::Deref, ptr::NonNull};
 
 /// A [`Value`] which manages its own memory. This can be constructed with [`Value::from_bytes_alloced`].
 /// If you have an [`AllocedValue`] and need an [`AllocedArray`] or [`AllocedDict`], you can use
@@ -43,7 +40,7 @@ impl AllocedValue {
         if self.value_type() == ValueType::Array {
             Some(AllocedArray {
                 buf: self.buf,
-                value: std::ptr::from_ref(Array::from_value(unsafe { &*self.value })),
+                value: core::ptr::from_ref(Array::from_value(unsafe { &*self.value })),
             })
         } else {
             None
@@ -56,7 +53,7 @@ impl AllocedValue {
         if self.value_type() == ValueType::Dict {
             Some(AllocedDict {
                 buf: self.buf,
-                value: std::ptr::from_ref(Dict::from_value(unsafe { &*self.value })),
+                value: core::ptr::from_ref(Dict::from_value(unsafe { &*self.value })),
             })
         } else {
             None
@@ -66,7 +63,7 @@ impl AllocedValue {
     pub(crate) unsafe fn new_dangling(data: &[u8]) -> Self {
         Self {
             buf: Arc::from(data.to_vec()),
-            value: std::ptr::slice_from_raw_parts(NonNull::<u8>::dangling().as_ptr(), 0)
+            value: core::ptr::slice_from_raw_parts(NonNull::<u8>::dangling().as_ptr(), 0)
                 as *const Value,
         }
     }
@@ -83,7 +80,7 @@ impl AllocedArray {
     pub fn empty() -> Self {
         AllocedArray {
             buf: EMPTY_ARRAY.clone(),
-            value: std::ptr::slice_from_raw_parts(EMPTY_ARRAY.as_ptr(), EMPTY_ARRAY.len())
+            value: core::ptr::slice_from_raw_parts(EMPTY_ARRAY.as_ptr(), EMPTY_ARRAY.len())
                 as *const Array,
         }
     }
@@ -95,14 +92,14 @@ impl AllocedDict {
     pub fn empty() -> Self {
         AllocedDict {
             buf: EMPTY_DICT.clone(),
-            value: std::ptr::slice_from_raw_parts(EMPTY_DICT.as_ptr(), EMPTY_DICT.len())
+            value: core::ptr::slice_from_raw_parts(EMPTY_DICT.as_ptr(), EMPTY_DICT.len())
                 as *const Dict,
         }
     }
 }
 
 impl<T: ?Sized + fmt::Debug> fmt::Debug for Alloced<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Alloced")
             .field("buf", &self.buf)
             .field("value_ptr", &self.value)

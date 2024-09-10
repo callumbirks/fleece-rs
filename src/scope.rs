@@ -1,9 +1,5 @@
-use std::{
-    ops::Deref,
-    ptr::NonNull,
-    sync::{Arc, Weak},
-};
-
+use alloc::sync::{Arc, Weak};
+use core::{ops::Deref, ptr::NonNull};
 use crossbeam_utils::sync::ShardedLock;
 use lazy_static::lazy_static;
 use rangemap::RangeMap;
@@ -26,11 +22,14 @@ impl Scope {
         Scope::containing(containing_data).and_then(|s| s.shared_keys.clone())
     }
 
+    #[must_use]
+    #[inline]
     pub fn shared_keys(&self) -> Option<&Arc<SharedKeys>> {
         self.shared_keys.as_ref()
     }
 
     /// The data retained by this scope. Returns [`None`] if the data has been deallocated.
+    #[must_use]
     pub fn data(&self) -> Option<Arc<[u8]>> {
         if let Some(strong_data) = &self.strong_data {
             Some(strong_data.clone())
@@ -40,6 +39,7 @@ impl Scope {
     }
 
     /// The root [`Value`] contained in the data retained by this scope. Returns [`None`] if the data has been deallocated.
+    #[must_use]
     pub fn root(&self) -> Option<AllocedValue> {
         self.data().and_then(|data| {
             self.root.map(|root| AllocedValue {
@@ -50,15 +50,19 @@ impl Scope {
     }
 
     /// The range of memory that this scope retains. Returns [`None`] if the data has been deallocated.
-    pub fn range(&self) -> Option<std::ops::Range<usize>> {
+    #[must_use]
+    pub fn range(&self) -> Option<core::ops::Range<usize>> {
         self.data().map(|data| {
             let start = data.as_ptr() as usize;
             start..start + data.len()
         })
     }
 
-    /// If the data in this scope is still being retained, release it. It will be dropped from the global retention mechanism,
-    /// but the data will not be deallocated until all references to it are dropped.
+    // Will not panic, because `write` only fails if the lock was poisoned.
+    // The lock is only poisoned if a write operation panics. We don't have any panics.
+    #[allow(clippy::missing_panics_doc)]
+    /// If the data in this scope is still being retained, release it from the global map. This will stop any new references
+    /// to it being taken, but the data will not be deallocated until all references to it are dropped.
     pub fn remove(&self) {
         let mut scope_map = SCOPE_MAP.write().unwrap();
         if let Some(range) = self.range() {
@@ -66,6 +70,9 @@ impl Scope {
         }
     }
 
+    // Will not panic, because `write` only fails if the lock was poisoned.
+    // The lock is only poisoned if a write operation panics. We don't have any panics.
+    #[allow(clippy::missing_panics_doc)]
     /// Create a new scope which retains the data it is given ownership of, and optionally retains the given [`SharedKeys`].
     pub fn new(data: impl Into<Arc<[u8]>>, shared_keys: Option<Arc<SharedKeys>>) -> Arc<Self> {
         let mut scope_map = SCOPE_MAP.write().unwrap();
@@ -93,6 +100,10 @@ impl Scope {
         Value::from_bytes(data).map(NonNull::from).ok()
     }
 
+    // Will not panic, because `read` only fails if the lock was poisoned.
+    // The lock is only poisoned if a write operation panics. We don't have any panics.
+    #[allow(clippy::missing_panics_doc)]
+    #[must_use]
     pub fn containing(data: *const u8) -> Option<Arc<Self>> {
         let scope_map = SCOPE_MAP.read().unwrap();
         let entry = scope_map.get(&(data as usize))?;

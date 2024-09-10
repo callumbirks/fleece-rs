@@ -1,5 +1,5 @@
+use alloc::boxed::Box;
 use core::fmt;
-use std::io::Write;
 
 use fixedstr::zstr;
 
@@ -95,12 +95,12 @@ impl SharedKeys {
         vec.into_boxed_slice()
     }
 
-    pub fn write_state(&self, encoder: &mut Encoder<impl Write>) -> Option<()> {
+    pub fn write_state(&self, encoder: &mut Encoder) -> Option<()> {
         if encoder.begin_array(self.0.len()).is_err() {
             return None;
         }
         for (key, _) in &self.0 {
-            encoder.write_value::<_, str>(key.as_str()).ok()?;
+            encoder.write_value(key.as_str()).ok()?;
         }
         encoder.end_array().ok()
     }

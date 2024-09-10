@@ -8,6 +8,9 @@ pub(crate) mod varint;
 
 mod error;
 
+use core::cmp::Ordering;
+use core::fmt;
+
 pub use array::Array;
 pub use dict::Dict;
 pub use sized::SizedValue;
@@ -16,8 +19,6 @@ use crate::alloced::AllocedValue;
 pub use error::DecodeError;
 use error::Result;
 use pointer::Pointer;
-use std::cmp::Ordering;
-use std::fmt::{Debug, Formatter};
 
 #[repr(transparent)]
 pub struct Value {
@@ -157,7 +158,7 @@ impl Value {
     pub unsafe fn from_bytes_unchecked(data: &[u8]) -> &Self {
         // Root is 2 bytes at the end of the data
         let root = &data[(data.len() - 2)..];
-        let root: &Value = std::mem::transmute(root);
+        let root: &Value = core::mem::transmute(root);
         if root.value_type() == ValueType::Pointer {
             return Pointer::from_value(root).deref_unchecked(false);
         } else if data.len() == 2 {
@@ -174,7 +175,7 @@ impl Value {
     pub fn clone_from_bytes(data: &[u8]) -> Result<AllocedValue> {
         let mut alloced = unsafe { AllocedValue::new_dangling(data) };
         let value = Value::from_bytes(&alloced.buf)?;
-        alloced.value = std::ptr::from_ref(value);
+        alloced.value = core::ptr::from_ref(value);
         Ok(alloced)
     }
 
@@ -187,7 +188,7 @@ impl Value {
     pub unsafe fn clone_from_bytes_unchecked(data: &[u8]) -> AllocedValue {
         let mut alloced = unsafe { AllocedValue::new_dangling(data) };
         let value = Value::from_bytes_unchecked(&alloced.buf);
-        alloced.value = std::ptr::from_ref(value);
+        alloced.value = core::ptr::from_ref(value);
         alloced
     }
 
@@ -267,7 +268,7 @@ impl Value {
                 let count = (self.bytes[0] & 0x07) as usize + 1;
                 let mut buf = [0u8; 8];
                 unsafe {
-                    std::ptr::copy_nonoverlapping(
+                    core::ptr::copy_nonoverlapping(
                         self.bytes[1..].as_ptr(),
                         buf.as_mut_ptr(),
                         count,
@@ -321,7 +322,7 @@ impl Value {
     #[must_use]
     pub fn to_str(&self) -> &str {
         match self.value_type() {
-            ValueType::String => std::str::from_utf8(self._get_data()).unwrap_or(""),
+            ValueType::String => core::str::from_utf8(self._get_data()).unwrap_or(""),
             _ => "",
         }
     }
@@ -359,7 +360,7 @@ impl Value {
         }
         // Root is 2 bytes at the end of the data
         let root = &data[(data.len() - 2)..];
-        let root: &Value = unsafe { std::mem::transmute(root) };
+        let root: &Value = unsafe { core::mem::transmute(root) };
 
         if root.value_type() == ValueType::Pointer {
             return Pointer::from_value(root).deref_checked(false, data.as_ptr());
@@ -418,7 +419,7 @@ impl Value {
             ValueType::String | ValueType::Data => {
                 let data = self._get_data();
                 if let Some(last) = data.last() {
-                    std::ptr::from_ref(last) as usize - self.bytes.as_ptr() as usize + 1
+                    core::ptr::from_ref(last) as usize - self.bytes.as_ptr() as usize + 1
                 } else {
                     0
                 }
@@ -492,8 +493,8 @@ impl Value {
     /// Converts a pointer to a `Value`, and validates its size
     pub(super) fn _from_raw<'a>(ptr: *const u8, available_size: usize) -> Result<&'a Value> {
         let target: &Value = unsafe {
-            let slice = std::slice::from_raw_parts(ptr, available_size);
-            std::mem::transmute(slice)
+            let slice = core::slice::from_raw_parts(ptr, available_size);
+            core::mem::transmute(slice)
         };
         if target.len() < 2 || target.required_size() > available_size {
             Err(DecodeError::ValueOutOfBounds {
@@ -514,8 +515,8 @@ impl Value {
         ptr: *const u8,
         available_size: usize,
     ) -> &'a Value {
-        let slice = std::slice::from_raw_parts(ptr, available_size);
-        std::mem::transmute(slice)
+        let slice = core::slice::from_raw_parts(ptr, available_size);
+        core::mem::transmute(slice)
     }
 
     /// A convenience to offset self by `count` bytes, then transmute the result to a `RawValue`
@@ -559,20 +560,20 @@ impl Value {
 
     #[must_use]
     pub fn null() -> &'static Value {
-        unsafe { std::mem::transmute(&constants::NULL[0..2]) }
+        unsafe { core::mem::transmute(&constants::NULL[0..2]) }
     }
 
     #[must_use]
     pub fn undefined() -> &'static Value {
-        unsafe { std::mem::transmute(&constants::UNDEFINED[0..2]) }
+        unsafe { core::mem::transmute(&constants::UNDEFINED[0..2]) }
     }
 
     #[must_use]
     pub fn bool(b: bool) -> &'static Value {
         if b {
-            unsafe { std::mem::transmute::<&[u8], &Value>(&constants::TRUE[0..2]) }
+            unsafe { core::mem::transmute::<&[u8], &Value>(&constants::TRUE[0..2]) }
         } else {
-            unsafe { std::mem::transmute::<&[u8], &Value>(&constants::FALSE[0..2]) }
+            unsafe { core::mem::transmute::<&[u8], &Value>(&constants::FALSE[0..2]) }
         }
     }
 }
@@ -585,8 +586,8 @@ impl Value {
     }
 }
 
-impl Debug for Value {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+impl fmt::Debug for Value {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut tuple = f.debug_tuple(&format!("{:?}", self.value_type()));
         if self.bytes.is_empty() {
             tuple.field(&"Empty");
@@ -623,8 +624,8 @@ impl Debug for Value {
     }
 }
 
-impl Debug for ValueType {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+impl fmt::Debug for ValueType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ValueType::Null => write!(f, "Null"),
             ValueType::Undefined => write!(f, "Undefined"),
