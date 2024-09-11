@@ -1,6 +1,6 @@
 use crate::encoder::EncodeError;
 use crate::value::DecodeError;
-use alloc::string::{String, ToString};
+use alloc::string::String;
 use core::fmt;
 
 #[cfg(feature = "serde")]
@@ -70,6 +70,7 @@ impl serde::de::Error for Error {
     where
         T: fmt::Display,
     {
+        use alloc::string::ToString;
         Error::Message(msg.to_string())
     }
 }
@@ -80,6 +81,7 @@ impl serde::ser::Error for Error {
     where
         T: fmt::Display,
     {
+        use alloc::string::ToString;
         Error::Message(msg.to_string())
     }
 }

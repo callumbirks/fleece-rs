@@ -1,5 +1,4 @@
-use crate::encoder::error::EncodeError;
-use crate::value::SizedValue;
+use crate::{encoder::error::EncodeError, value::SizedValue};
 
 use alloc::{boxed::Box, vec::Vec};
 

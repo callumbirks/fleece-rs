@@ -118,7 +118,9 @@ impl Encoder {
         } else {
             // Otherwise, write it to output and push a pointer to it onto the current collection
             let offset = self._write(value, false, false);
-            let pointer = SizedValue::new_pointer(offset).ok_or(EncodeError::PointerTooLarge)?;
+            let Some(pointer) = SizedValue::new_pointer(offset) else {
+                return Err(EncodeError::PointerTooLarge);
+            };
             self._push(pointer)
         }
     }
@@ -140,12 +142,10 @@ impl Encoder {
             return Err(EncodeError::CollectionNotOpen);
         }
         match value.value_type() {
-            ValueType::True => self._push(SizedValue::from_narrow(value::constants::TRUE)),
-            ValueType::False => self._push(SizedValue::from_narrow(value::constants::FALSE)),
-            ValueType::Null => self._push(SizedValue::from_narrow(value::constants::NULL)),
-            ValueType::Undefined => {
-                self._push(SizedValue::from_narrow(value::constants::UNDEFINED))
-            }
+            ValueType::True => self._push(SizedValue::new_narrow(value::constants::TRUE)),
+            ValueType::False => self._push(SizedValue::new_narrow(value::constants::FALSE)),
+            ValueType::Null => self._push(SizedValue::new_narrow(value::constants::NULL)),
+            ValueType::Undefined => self._push(SizedValue::new_narrow(value::constants::UNDEFINED)),
             ValueType::Short => self.write_value(&value.to_short()),
             ValueType::UnsignedInt => self.write_value(&value.to_unsigned_int()),
             ValueType::Int => self.write_value(&value.to_int()),
@@ -267,18 +267,10 @@ impl Encoder {
                     self._write(&val, is_wide, false)
                 }
                 DictKey::Pointer(_, offset) => {
-                    if is_wide {
-                        let Some(val) = SizedValue::new_wide_pointer(*offset) else {
-                            return Err(EncodeError::PointerTooLarge);
-                        };
-                        self._write(&val, is_wide, false)
-                    } else {
-                        #[allow(clippy::cast_possible_truncation)]
-                        let Some(val) = SizedValue::new_narrow_pointer(*offset as u16) else {
-                            return Err(EncodeError::PointerTooLarge);
-                        };
-                        self._write(&val, is_wide, false)
-                    }
+                    let Some(val) = SizedValue::new_pointer(*offset) else {
+                        return Err(EncodeError::PointerTooLarge);
+                    };
+                    self._write(&val, is_wide, false)
                 }
             };
             self._write(&elem.val, is_wide, false);
@@ -435,7 +427,7 @@ impl Encoder {
     fn _array_should_be_wide(&self, array: &value_stack::Array) -> bool {
         for v in &array.values {
             if v.value_type() == ValueType::Pointer
-                && v.actual_offset(self.out.len()) > u32::from(pointer::MAX_NARROW)
+                && v.actual_pointer_offset(self.out.len()) > u32::from(pointer::MAX_NARROW)
             {
                 return true;
             }
@@ -454,7 +446,7 @@ impl Encoder {
                 }
             }
             if elem.val.value_type() == ValueType::Pointer
-                && elem.val.actual_offset(self.out.len()) > u32::from(pointer::MAX_NARROW)
+                && elem.val.actual_pointer_offset(self.out.len()) > u32::from(pointer::MAX_NARROW)
             {
                 return true;
             }
@@ -468,8 +460,7 @@ impl Encoder {
         let mut len = self.out.len() as u32;
         for elem in &mut array.values {
             if elem.value_type() == ValueType::Pointer {
-                let pointer = Encoder::_fix_pointer(elem, len, is_wide);
-                *elem = pointer;
+                *elem = Encoder::_fix_pointer(elem, len);
             }
             len += if is_wide { 4 } else { 2 };
         }
@@ -484,29 +475,23 @@ impl Encoder {
             }
             len += if is_wide { 4 } else { 2 };
             if elem.val.value_type() == ValueType::Pointer {
-                elem.val = Encoder::_fix_pointer(&elem.val, len, is_wide);
+                elem.val = Encoder::_fix_pointer(&elem.val, len);
             }
             len += if is_wide { 4 } else { 2 };
         }
     }
 
     #[allow(clippy::cast_possible_truncation)]
-    fn _fix_pointer(sized_pointer: &SizedValue, len: u32, is_wide: bool) -> SizedValue {
-        let pointer = ValuePointer::from_value(sized_pointer.as_value());
-
-        let offset_from_start = unsafe { pointer.get_offset(sized_pointer.is_wide()) };
-        let offset = len - offset_from_start;
-        if is_wide {
-            SizedValue::new_wide_pointer(offset).expect("Pointer unexpectedly large")
-        } else {
-            SizedValue::new_narrow_pointer(offset as u16).expect("Pointer unexpectedly large")
-        }
+    fn _fix_pointer(pointer: &SizedValue, len: u32) -> SizedValue {
+        let offset = pointer.actual_pointer_offset(len as usize);
+        SizedValue::new_pointer(offset).expect("Pointer unexpectedly large")
     }
 
     fn _finished_collection(&mut self, offset_from_start: u32) -> Result<()> {
         if let Some(collection) = self.collection_stack.top_mut() {
-            let pointer =
-                SizedValue::new_pointer(offset_from_start).ok_or(EncodeError::PointerTooLarge)?;
+            let Some(pointer) = SizedValue::new_pointer(offset_from_start) else {
+                return Err(EncodeError::PointerTooLarge);
+            };
             match collection {
                 Collection::Dict(dict) => {
                     dict.push_value(pointer);
@@ -521,14 +506,15 @@ impl Encoder {
             let offset = self._actual_pointer_offset(offset_from_start);
             #[allow(clippy::cast_possible_truncation)]
             let root = if offset <= u32::from(pointer::MAX_NARROW) {
-                SizedValue::new_narrow_pointer(offset as u16).unwrap()
+                SizedValue::new_pointer(offset).unwrap()
             } else {
                 // The root value must be 2 bytes, so if the pointer to the top-level collection
                 // is 4 bytes wide, we need to write that, then write another 2-byte pointer to that
-                let inner_root =
-                    SizedValue::new_pointer(offset).ok_or(EncodeError::PointerTooLarge)?;
+                let Some(inner_root) = SizedValue::new_pointer(offset) else {
+                    return Err(EncodeError::PointerTooLarge);
+                };
                 self._write(&inner_root, true, false);
-                SizedValue::new_narrow_pointer(4).unwrap()
+                SizedValue::new_pointer(4).unwrap()
             };
             self._write(&root, false, false);
             self.top_collection_closed = true;

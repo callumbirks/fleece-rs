@@ -13,7 +13,7 @@ use core::fmt;
 
 pub use array::Array;
 pub use dict::Dict;
-pub(crate) use sized::SizedValue;
+pub use sized::SizedValue;
 
 use crate::alloced::AllocedValue;
 pub use error::DecodeError;

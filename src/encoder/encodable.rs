@@ -2,9 +2,9 @@ use core::num::NonZeroUsize;
 
 use crate::encoder::value_stack;
 use crate::encoder::{Encodable, NullValue, UndefinedValue};
-use crate::value::SizedValue;
 use crate::value::{array, varint};
-use crate::{value, Result, Value};
+use crate::value::{pointer, SizedValue};
+use crate::{value, Result, Value, ValueType};
 use alloc::boxed::Box;
 
 // All the built-in implementations of [`Encodable`].
@@ -139,7 +139,7 @@ impl Encodable for u16 {
         }
         let mut bytes = self.to_be_bytes();
         bytes[0] |= value::tag::SHORT;
-        Some(SizedValue::from_narrow(bytes))
+        Some(SizedValue::new_narrow(bytes))
     }
 }
 
@@ -167,7 +167,7 @@ impl Encodable for i16 {
         let mut bytes = self.to_be_bytes();
         // Make sure to zero out the top 4 bits (where the tag goes) in-case of sign extension
         bytes[0] = (bytes[0] & 0x0F) | value::tag::SHORT;
-        Some(SizedValue::from_narrow(bytes))
+        Some(SizedValue::new_narrow(bytes))
     }
 }
 
@@ -278,9 +278,9 @@ impl Encodable for bool {
 
     fn to_sized_value(&self) -> Option<SizedValue> {
         if *self {
-            Some(SizedValue::from_narrow(value::constants::TRUE))
+            Some(SizedValue::new_narrow(value::constants::TRUE))
         } else {
-            Some(SizedValue::from_narrow(value::constants::FALSE))
+            Some(SizedValue::new_narrow(value::constants::FALSE))
         }
     }
 }
@@ -296,7 +296,7 @@ impl Encodable for NullValue {
     }
 
     fn to_sized_value(&self) -> Option<SizedValue> {
-        Some(SizedValue::from_narrow(value::constants::NULL))
+        Some(SizedValue::new_narrow(value::constants::NULL))
     }
 }
 
@@ -311,7 +311,7 @@ impl Encodable for UndefinedValue {
     }
 
     fn to_sized_value(&self) -> Option<SizedValue> {
-        Some(SizedValue::from_narrow(value::constants::UNDEFINED))
+        Some(SizedValue::new_narrow(value::constants::UNDEFINED))
     }
 }
 
@@ -396,8 +396,8 @@ impl Encodable for [u8] {
 
     fn to_sized_value(&self) -> Option<SizedValue> {
         match self.len() {
-            0 => Some(SizedValue::from_narrow([value::tag::DATA, 0])),
-            1 => Some(SizedValue::from_narrow([value::tag::DATA | 0x01, self[0]])),
+            0 => Some(SizedValue::new_narrow([value::tag::DATA, 0])),
+            1 => Some(SizedValue::new_narrow([value::tag::DATA | 0x01, self[0]])),
             _ => None,
         }
     }
@@ -419,8 +419,8 @@ impl Encodable for str {
 
     fn to_sized_value(&self) -> Option<SizedValue> {
         match self.len() {
-            0 => Some(SizedValue::from_narrow([value::tag::STRING, 0])),
-            1 => Some(SizedValue::from_narrow([
+            0 => Some(SizedValue::new_narrow([value::tag::STRING, 0])),
+            1 => Some(SizedValue::new_narrow([
                 value::tag::STRING | 0x01,
                 self.as_bytes()[0],
             ])),
@@ -458,25 +458,49 @@ where
 impl super::private::Sealed for SizedValue {}
 impl Encodable for SizedValue {
     fn write_fleece_to(&self, buf: &mut [u8], is_wide: bool) -> Option<NonZeroUsize> {
-        if is_wide {
-            if buf.len() < 4 {
-                return None;
+        if self.value_type() == ValueType::Pointer {
+            let offset = self.pointer_offset();
+
+            if offset > pointer::MAX_NARROW as u32 || is_wide {
+                if buf.len() < 4 {
+                    return None;
+                }
+                buf[0..4].copy_from_slice(&(offset >> 1).to_be_bytes());
+                buf[0] |= value::tag::POINTER;
+                unsafe { Some(NonZeroUsize::new_unchecked(4)) }
+            } else {
+                if buf.len() < 2 {
+                    return None;
+                }
+                buf[0..2].copy_from_slice(&(offset as u16 >> 1).to_be_bytes());
+                buf[0] |= value::tag::POINTER;
+                unsafe { Some(NonZeroUsize::new_unchecked(2)) }
             }
-            buf[0..4].copy_from_slice(self.as_bytes());
-            unsafe { Some(NonZeroUsize::new_unchecked(4)) }
         } else {
-            if buf.len() < 2 {
-                return None;
+            if is_wide {
+                if buf.len() < 4 {
+                    return None;
+                }
+                buf[0..4].copy_from_slice(self.as_bytes());
+                unsafe { Some(NonZeroUsize::new_unchecked(4)) }
+            } else {
+                if buf.len() < 2 {
+                    return None;
+                }
+                buf[0..2].copy_from_slice(&self.as_bytes()[..2]);
+                buf[0] &= 0xBF;
+                unsafe { Some(NonZeroUsize::new_unchecked(2)) }
             }
-            buf[0..2].copy_from_slice(&self.as_bytes()[..2]);
-            buf[0] &= 0xBF;
-            unsafe { Some(NonZeroUsize::new_unchecked(2)) }
         }
     }
 
     fn fleece_size(&self) -> usize {
-        if self.is_wide() {
-            4
+        if self.value_type() == ValueType::Pointer {
+            if self.pointer_offset() > pointer::MAX_NARROW as u32 {
+                4
+            } else {
+                2
+            }
         } else {
             2
         }
