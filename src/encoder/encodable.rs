@@ -1,25 +1,31 @@
+use core::num::NonZeroUsize;
+
 use crate::encoder::value_stack;
 use crate::encoder::{Encodable, NullValue, UndefinedValue};
 use crate::value::SizedValue;
 use crate::value::{array, varint};
 use crate::{value, Result, Value};
 use alloc::boxed::Box;
-use alloc::vec::Vec;
 
-/// All the built-in implementations of [`Encodable`].
+// All the built-in implementations of [`Encodable`].
 
+impl super::private::Sealed for i64 {}
 impl Encodable for i64 {
     #[allow(clippy::cast_possible_truncation)]
-    fn write_fleece_to(&self, vec: &mut Vec<u8>, is_wide: bool) -> usize {
+    fn write_fleece_to(&self, buf: &mut [u8], is_wide: bool) -> Option<NonZeroUsize> {
         // If this is small enough, store it as a short
         if *self <= 2047 || *self >= -2048 {
             #[allow(clippy::cast_possible_truncation)]
-            return (*self as i16).write_fleece_to(vec, is_wide);
+            return (*self as i16).write_fleece_to(buf, is_wide);
         }
-        let byte_count = self.fleece_size() - 1;
-        vec.push(value::tag::INT | ((byte_count as u8) - 1));
-        vec.extend_from_slice(&self.to_le_bytes());
-        byte_count + 1
+        let fleece_size = self.fleece_size();
+        if fleece_size > buf.len() {
+            return None;
+        }
+        let byte_count = fleece_size - 1;
+        buf[0] = value::tag::INT | ((byte_count as u8) - 1);
+        buf[1..=byte_count].copy_from_slice(&self.to_le_bytes()[..byte_count]);
+        unsafe { Some(NonZeroUsize::new_unchecked(byte_count + 1)) }
     }
 
     fn fleece_size(&self) -> usize {
@@ -42,18 +48,23 @@ impl Encodable for i64 {
     }
 }
 
+impl super::private::Sealed for u64 {}
 impl Encodable for u64 {
     #[allow(clippy::cast_possible_truncation)] // Suppress warning for `byte_count as u8`
-    fn write_fleece_to(&self, vec: &mut Vec<u8>, is_wide: bool) -> usize {
+    fn write_fleece_to(&self, buf: &mut [u8], is_wide: bool) -> Option<NonZeroUsize> {
         // If this is small enough, store it as a short
         if *self <= 2047 {
             #[allow(clippy::cast_possible_truncation)]
-            return (*self as u16).write_fleece_to(vec, is_wide);
+            return (*self as u16).write_fleece_to(buf, is_wide);
         }
-        let byte_count = self.fleece_size() - 1;
-        vec.push(value::tag::INT | value::extra_flags::UNSIGNED_INT | ((byte_count as u8) - 1));
-        vec.extend_from_slice(&self.to_le_bytes());
-        byte_count + 1
+        let fleece_size = self.fleece_size();
+        if fleece_size > buf.len() {
+            return None;
+        }
+        let byte_count = fleece_size - 1;
+        buf[0] = value::tag::INT | value::extra_flags::UNSIGNED_INT | ((byte_count as u8) - 1);
+        buf[1..=byte_count].copy_from_slice(&self.to_le_bytes()[..byte_count]);
+        unsafe { Some(NonZeroUsize::new_unchecked(byte_count + 1)) }
     }
 
     fn fleece_size(&self) -> usize {
@@ -75,9 +86,10 @@ impl Encodable for u64 {
     }
 }
 
+impl super::private::Sealed for i32 {}
 impl Encodable for i32 {
-    fn write_fleece_to(&self, vec: &mut Vec<u8>, is_wide: bool) -> usize {
-        i64::from(*self).write_fleece_to(vec, is_wide)
+    fn write_fleece_to(&self, buf: &mut [u8], is_wide: bool) -> Option<NonZeroUsize> {
+        i64::from(*self).write_fleece_to(buf, is_wide)
     }
 
     fn fleece_size(&self) -> usize {
@@ -89,9 +101,10 @@ impl Encodable for i32 {
     }
 }
 
+impl super::private::Sealed for u32 {}
 impl Encodable for u32 {
-    fn write_fleece_to(&self, vec: &mut Vec<u8>, is_wide: bool) -> usize {
-        u64::from(*self).write_fleece_to(vec, is_wide)
+    fn write_fleece_to(&self, buf: &mut [u8], is_wide: bool) -> Option<NonZeroUsize> {
+        u64::from(*self).write_fleece_to(buf, is_wide)
     }
 
     fn fleece_size(&self) -> usize {
@@ -103,16 +116,17 @@ impl Encodable for u32 {
     }
 }
 
+impl super::private::Sealed for u16 {}
 impl Encodable for u16 {
-    fn write_fleece_to(&self, vec: &mut Vec<u8>, is_wide: bool) -> usize {
+    fn write_fleece_to(&self, buf: &mut [u8], is_wide: bool) -> Option<NonZeroUsize> {
         // Short can only be 12 bits
         if *self > 2047 {
-            return u64::from(*self).write_fleece_to(vec, is_wide);
+            return u64::from(*self).write_fleece_to(buf, is_wide);
         }
         let Some(val) = self.to_sized_value() else {
             unreachable!();
         };
-        val.write_fleece_to(vec, is_wide)
+        val.write_fleece_to(buf, is_wide)
     }
 
     fn fleece_size(&self) -> usize {
@@ -129,21 +143,23 @@ impl Encodable for u16 {
     }
 }
 
+impl super::private::Sealed for i16 {}
 impl Encodable for i16 {
-    fn write_fleece_to(&self, vec: &mut Vec<u8>, is_wide: bool) -> usize {
+    fn write_fleece_to(&self, buf: &mut [u8], is_wide: bool) -> Option<NonZeroUsize> {
         // Short can only be 12 bits
         if *self > 2047 || *self < -2048 {
-            return i64::from(*self).write_fleece_to(vec, is_wide);
+            return i64::from(*self).write_fleece_to(buf, is_wide);
         }
         let Some(val) = self.to_sized_value() else {
             unreachable!();
         };
-        val.write_fleece_to(vec, is_wide)
+        val.write_fleece_to(buf, is_wide)
     }
 
     fn fleece_size(&self) -> usize {
         2
     }
+
     fn to_sized_value(&self) -> Option<SizedValue> {
         if *self > 2047 || *self < -2048 {
             return None;
@@ -155,9 +171,10 @@ impl Encodable for i16 {
     }
 }
 
+impl super::private::Sealed for u8 {}
 impl Encodable for u8 {
-    fn write_fleece_to(&self, vec: &mut Vec<u8>, is_wide: bool) -> usize {
-        (u16::from(*self)).write_fleece_to(vec, is_wide)
+    fn write_fleece_to(&self, buf: &mut [u8], is_wide: bool) -> Option<NonZeroUsize> {
+        (u16::from(*self)).write_fleece_to(buf, is_wide)
     }
 
     fn fleece_size(&self) -> usize {
@@ -169,9 +186,10 @@ impl Encodable for u8 {
     }
 }
 
+impl super::private::Sealed for i8 {}
 impl Encodable for i8 {
-    fn write_fleece_to(&self, vec: &mut Vec<u8>, is_wide: bool) -> usize {
-        (i16::from(*self)).write_fleece_to(vec, is_wide)
+    fn write_fleece_to(&self, buf: &mut [u8], is_wide: bool) -> Option<NonZeroUsize> {
+        (i16::from(*self)).write_fleece_to(buf, is_wide)
     }
 
     fn fleece_size(&self) -> usize {
@@ -183,13 +201,16 @@ impl Encodable for i8 {
     }
 }
 
+impl super::private::Sealed for f32 {}
 impl Encodable for f32 {
-    fn write_fleece_to(&self, vec: &mut Vec<u8>, _is_wide: bool) -> usize {
-        vec.push(value::tag::FLOAT);
-        vec.push(0);
-        let bytes: [u8; 4] = self.to_le_bytes();
-        vec.extend_from_slice(&bytes);
-        6
+    fn write_fleece_to(&self, buf: &mut [u8], _is_wide: bool) -> Option<NonZeroUsize> {
+        if self.fleece_size() > buf.len() {
+            return None;
+        }
+        buf[0] = value::tag::FLOAT;
+        buf[1] = 0;
+        buf[2..6].copy_from_slice(&self.to_le_bytes());
+        unsafe { Some(NonZeroUsize::new_unchecked(6)) }
     }
 
     fn fleece_size(&self) -> usize {
@@ -201,13 +222,17 @@ impl Encodable for f32 {
     }
 }
 
+impl super::private::Sealed for f64 {}
 impl Encodable for f64 {
-    fn write_fleece_to(&self, vec: &mut Vec<u8>, _is_wide: bool) -> usize {
-        vec.push(value::tag::FLOAT | 0x08);
-        vec.push(0);
-        let bytes: [u8; 8] = self.to_le_bytes();
-        vec.extend_from_slice(&bytes);
-        10
+    fn write_fleece_to(&self, buf: &mut [u8], _is_wide: bool) -> Option<NonZeroUsize> {
+        if self.fleece_size() > buf.len() {
+            return None;
+        }
+
+        buf[0] = value::tag::FLOAT | 0x08;
+        buf[1] = 0;
+        buf[2..10].copy_from_slice(&self.to_le_bytes());
+        unsafe { Some(NonZeroUsize::new_unchecked(10)) }
     }
 
     fn fleece_size(&self) -> usize {
@@ -219,18 +244,27 @@ impl Encodable for f64 {
     }
 }
 
-fn write_fleece_constant(vec: &mut Vec<u8>, constant: [u8; 2], is_wide: bool) -> usize {
-    vec.extend_from_slice(&constant);
+fn write_fleece_constant(buf: &mut [u8], constant: [u8; 2], is_wide: bool) -> Option<NonZeroUsize> {
     if is_wide {
-        vec.extend_from_slice(&[0u8, 0u8]);
-        4
+        if buf.len() < 4 {
+            return None;
+        }
+        buf[0..2].copy_from_slice(&constant);
+        buf[2] = 0;
+        buf[3] = 0;
+        unsafe { Some(NonZeroUsize::new_unchecked(4)) }
     } else {
-        2
+        if buf.len() < 2 {
+            return None;
+        }
+        buf[0..2].copy_from_slice(&constant);
+        unsafe { Some(NonZeroUsize::new_unchecked(2)) }
     }
 }
 
+impl super::private::Sealed for bool {}
 impl Encodable for bool {
-    fn write_fleece_to(&self, vec: &mut Vec<u8>, is_wide: bool) -> usize {
+    fn write_fleece_to(&self, vec: &mut [u8], is_wide: bool) -> Option<NonZeroUsize> {
         if *self {
             write_fleece_constant(vec, value::constants::TRUE, is_wide)
         } else {
@@ -251,8 +285,9 @@ impl Encodable for bool {
     }
 }
 
+impl super::private::Sealed for NullValue {}
 impl Encodable for NullValue {
-    fn write_fleece_to(&self, vec: &mut Vec<u8>, is_wide: bool) -> usize {
+    fn write_fleece_to(&self, vec: &mut [u8], is_wide: bool) -> Option<NonZeroUsize> {
         write_fleece_constant(vec, value::constants::NULL, is_wide)
     }
 
@@ -265,9 +300,10 @@ impl Encodable for NullValue {
     }
 }
 
+impl super::private::Sealed for UndefinedValue {}
 impl Encodable for UndefinedValue {
-    fn write_fleece_to(&self, vec: &mut Vec<u8>, is_wide: bool) -> usize {
-        write_fleece_constant(vec, value::constants::UNDEFINED, is_wide)
+    fn write_fleece_to(&self, buf: &mut [u8], is_wide: bool) -> Option<NonZeroUsize> {
+        write_fleece_constant(buf, value::constants::UNDEFINED, is_wide)
     }
 
     fn fleece_size(&self) -> usize {
@@ -280,13 +316,14 @@ impl Encodable for UndefinedValue {
 }
 
 // Data and String are encoded the same in Fleece, apart from the value type tag.
+// INVARIANTS:
+//   - `buf` MUST be large enough to encode `string`.
 fn write_fleece_string<const IS_STR: bool>(
     string: &[u8],
-    vec: &mut Vec<u8>,
+    buf: &mut [u8],
     is_wide: bool,
-) -> usize {
-    let mut buf = [0_u8; 4];
-    buf[0] = if IS_STR {
+) -> NonZeroUsize {
+    let tag = if IS_STR {
         value::tag::STRING
     } else {
         value::tag::DATA
@@ -296,51 +333,57 @@ fn write_fleece_string<const IS_STR: bool>(
         // If size is 1 or 0, size fits in the tiny value and string fits in the second byte.
         0 => {
             if is_wide {
-                vec.extend_from_slice(&buf);
-                4
+                buf[0] = tag;
+                buf[1..4].copy_from_slice(&[0, 0, 0]);
+                unsafe { NonZeroUsize::new_unchecked(4) }
             } else {
-                vec.extend_from_slice(&buf[..2]);
-                2
+                buf[0] = tag;
+                buf[1] = 0;
+                unsafe { NonZeroUsize::new_unchecked(2) }
             }
         }
         1 => {
-            buf[0] |= 1;
-            buf[1] = string[0];
             if is_wide {
-                vec.extend_from_slice(&buf);
-                4
+                buf[0] = tag | 1;
+                buf[1] = string[0];
+                buf[2..4].copy_from_slice(&[0, 0]);
+                unsafe { NonZeroUsize::new_unchecked(4) }
             } else {
-                vec.extend_from_slice(&buf[..2]);
-                2
+                buf[0] = tag | 1;
+                buf[1] = string[0];
+                unsafe { NonZeroUsize::new_unchecked(2) }
             }
         }
         // If size is up to 0x0E (0x0F is the bit that indicates a varint), we can fit the size in the tiny value.
         #[allow(clippy::cast_possible_truncation)]
         2..=0x0E => {
-            buf[0] |= string.len() as u8;
-            vec.push(buf[0]);
-            vec.extend_from_slice(string);
-            string.len() + 1
+            let len = string.len();
+            buf[0] = tag | len as u8;
+            buf[1..=len].copy_from_slice(string);
+            unsafe { NonZeroUsize::new_unchecked(len + 1) }
         }
         // Any larger sizes will store the size as a varint.
         len => {
-            buf[0] |= 0x0F;
+            buf[0] = tag | 0x0F;
             let mut varint_buf = [0_u8; varint::MAX_LEN];
             let varint_size = varint::write(&mut varint_buf, string.len() as u64);
-            // Write the tag + tiny (1 byte)
-            vec.push(buf[0]);
             // Write the varint
-            vec.extend_from_slice(&varint_buf[..varint_size]);
+            buf[1..=varint_size].copy_from_slice(&varint_buf[..varint_size]);
             // Write the string
-            vec.extend_from_slice(string);
-            1 + varint_size + len
+            buf[(1 + varint_size)..(1 + varint_size + len)].copy_from_slice(string);
+            unsafe { NonZeroUsize::new_unchecked(1 + varint_size + len) }
         }
     }
 }
 
+impl super::private::Sealed for [u8] {}
 impl Encodable for [u8] {
-    fn write_fleece_to(&self, vec: &mut Vec<u8>, is_wide: bool) -> usize {
-        write_fleece_string::<false>(self, vec, is_wide)
+    fn write_fleece_to(&self, buf: &mut [u8], is_wide: bool) -> Option<NonZeroUsize> {
+        if self.fleece_size() > buf.len() {
+            None
+        } else {
+            Some(write_fleece_string::<false>(self, buf, is_wide))
+        }
     }
 
     fn fleece_size(&self) -> usize {
@@ -360,9 +403,14 @@ impl Encodable for [u8] {
     }
 }
 
+impl super::private::Sealed for str {}
 impl Encodable for str {
-    fn write_fleece_to(&self, vec: &mut Vec<u8>, is_wide: bool) -> usize {
-        write_fleece_string::<true>(self.as_bytes(), vec, is_wide)
+    fn write_fleece_to(&self, buf: &mut [u8], is_wide: bool) -> Option<NonZeroUsize> {
+        if self.fleece_size() > buf.len() {
+            None
+        } else {
+            Some(write_fleece_string::<true>(self.as_bytes(), buf, is_wide))
+        }
     }
 
     fn fleece_size(&self) -> usize {
@@ -381,14 +429,15 @@ impl Encodable for str {
     }
 }
 
+impl<T> super::private::Sealed for Option<T> {}
 impl<T> Encodable for Option<T>
 where
     T: Encodable,
 {
-    fn write_fleece_to(&self, vec: &mut Vec<u8>, is_wide: bool) -> usize {
+    fn write_fleece_to(&self, buf: &mut [u8], is_wide: bool) -> Option<NonZeroUsize> {
         match self {
-            Some(value) => value.write_fleece_to(vec, is_wide),
-            None => NullValue.write_fleece_to(vec, is_wide),
+            Some(value) => value.write_fleece_to(buf, is_wide),
+            None => NullValue.write_fleece_to(buf, is_wide),
         }
     }
 
@@ -406,14 +455,22 @@ where
     }
 }
 
+impl super::private::Sealed for SizedValue {}
 impl Encodable for SizedValue {
-    fn write_fleece_to(&self, vec: &mut Vec<u8>, is_wide: bool) -> usize {
+    fn write_fleece_to(&self, buf: &mut [u8], is_wide: bool) -> Option<NonZeroUsize> {
         if is_wide {
-            vec.extend_from_slice(self.as_bytes());
-            4
+            if buf.len() < 4 {
+                return None;
+            }
+            buf[0..4].copy_from_slice(self.as_bytes());
+            unsafe { Some(NonZeroUsize::new_unchecked(4)) }
         } else {
-            vec.extend_from_slice(&self.as_bytes()[..2]);
-            2
+            if buf.len() < 2 {
+                return None;
+            }
+            buf[0..2].copy_from_slice(&self.as_bytes()[..2]);
+            buf[0] &= 0xBF;
+            unsafe { Some(NonZeroUsize::new_unchecked(2)) }
         }
     }
 
@@ -430,35 +487,56 @@ impl Encodable for SizedValue {
     }
 }
 
-fn write_valuestack_collection(vec: &mut Vec<u8>, tag: u8, len: usize, is_wide: bool) -> usize {
-    let mut buf = [0_u8; 2 + varint::MAX_LEN];
-    let written = 2 + if len >= array::VARINT_COUNT as usize {
-        varint::write(&mut buf[2..], len as u64)
-    } else {
-        0
-    };
+// INVARIANTS:
+//   - `buf` MUST be large enough to encode `string`.
+fn write_valuestack_collection(buf: &mut [u8], tag: u8, len: usize, is_wide: bool) -> NonZeroUsize {
     #[allow(clippy::cast_possible_truncation)]
     let inline_size = len.min(array::VARINT_COUNT as usize) as u16;
 
-    buf[0] = tag | (inline_size >> 8) as u8;
+    buf[0] = if is_wide {
+        0x08 | tag | (inline_size >> 8) as u8
+    } else {
+        tag | (inline_size >> 8) as u8
+    };
+    let _first = buf[0];
     buf[1] = (inline_size & 0xFF) as u8;
 
-    if is_wide {
-        buf[0] |= 0x08;
-    }
+    let written = if len >= array::VARINT_COUNT as usize {
+        let mut varint_buf = [0_u8; varint::MAX_LEN];
+        let varint_size = varint::write(&mut varint_buf, len as u64);
 
-    vec.extend_from_slice(&buf[..written]);
-    written
+        buf[2..(2 + varint_size)].copy_from_slice(&varint_buf[..varint_size]);
+        2 + varint_size
+    } else {
+        2
+    };
+
+    unsafe { NonZeroUsize::new_unchecked(written) }
 }
 
 // Just write the Array header, not the values
+impl super::private::Sealed for value_stack::Array {}
 impl Encodable for value_stack::Array {
-    fn write_fleece_to(&self, vec: &mut Vec<u8>, is_wide: bool) -> usize {
-        write_valuestack_collection(vec, value::tag::ARRAY, self.values.len(), is_wide)
+    fn write_fleece_to(&self, buf: &mut [u8], is_wide: bool) -> Option<NonZeroUsize> {
+        if self.fleece_size() > buf.len() {
+            None
+        } else {
+            Some(write_valuestack_collection(
+                buf,
+                value::tag::ARRAY,
+                self.values.len(),
+                is_wide,
+            ))
+        }
     }
 
     fn fleece_size(&self) -> usize {
-        2
+        let len = self.values.len();
+        2 + if len >= array::VARINT_COUNT as usize {
+            varint::size_required(len as u64)
+        } else {
+            0
+        }
     }
 
     fn to_sized_value(&self) -> Option<SizedValue> {
@@ -466,14 +544,29 @@ impl Encodable for value_stack::Array {
     }
 }
 
+impl super::private::Sealed for value_stack::Dict {}
 impl Encodable for value_stack::Dict {
     // Just write the Dict header, not the values
-    fn write_fleece_to(&self, vec: &mut Vec<u8>, is_wide: bool) -> usize {
-        write_valuestack_collection(vec, value::tag::DICT, self.values.len(), is_wide)
+    fn write_fleece_to(&self, buf: &mut [u8], is_wide: bool) -> Option<NonZeroUsize> {
+        if self.fleece_size() > buf.len() {
+            None
+        } else {
+            Some(write_valuestack_collection(
+                buf,
+                value::tag::DICT,
+                self.values.len(),
+                is_wide,
+            ))
+        }
     }
 
     fn fleece_size(&self) -> usize {
-        2
+        let len = self.values.len();
+        2 + if len >= array::VARINT_COUNT as usize {
+            varint::size_required(len as u64)
+        } else {
+            0
+        }
     }
 
     fn to_sized_value(&self) -> Option<SizedValue> {
@@ -491,9 +584,8 @@ where
     T: Encodable + ?Sized,
 {
     fn as_boxed_value(&self) -> Result<Box<Value>> {
-        let mut buf = Vec::with_capacity(self.fleece_size());
+        let mut buf: Box<[u8]> = core::iter::repeat(0).take(self.fleece_size()).collect();
         self.write_fleece_to(&mut buf, false);
-        let boxed = buf.into_boxed_slice();
-        Ok(unsafe { core::mem::transmute::<Box<[u8]>, Box<Value>>(boxed) })
+        Ok(unsafe { core::mem::transmute::<Box<[u8]>, Box<Value>>(buf) })
     }
 }

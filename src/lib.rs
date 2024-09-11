@@ -1,4 +1,4 @@
-#![cfg_attr(not(any(feature = "std", test)), no_std)]
+#![cfg_attr(not(test), no_std)]
 
 #[macro_use]
 extern crate alloc;
@@ -8,6 +8,7 @@ pub mod alloced;
 mod de;
 pub mod encoder;
 pub mod error;
+//pub mod mutable;
 mod scope;
 #[cfg(feature = "serde")]
 mod ser;

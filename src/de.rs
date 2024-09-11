@@ -1,4 +1,4 @@
-use alloc::sync::Arc;
+use alloc::{string::String, sync::Arc};
 use core::fmt;
 
 use crate::scope::Scope;
@@ -161,7 +161,7 @@ impl<'de, 'value, 'sk> de::Deserializer<'de> for &Deserializer<'value, 'sk> {
         }
     }
 
-    fn deserialize_option<V>(self, visitor: V) -> std::result::Result<V::Value, Self::Error>
+    fn deserialize_option<V>(self, visitor: V) -> Result<V::Value>
     where
         V: Visitor<'de>,
     {

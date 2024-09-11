@@ -1,6 +1,6 @@
 use crate::encoder::EncodeError;
 use crate::value::DecodeError;
-use alloc::string::String;
+use alloc::string::{String, ToString};
 use core::fmt;
 
 #[cfg(feature = "serde")]

@@ -1,5 +1,6 @@
 use core::borrow::Borrow;
 use core::cmp::Ordering;
+use core::num::NonZeroUsize;
 
 use crate::encoder::value_stack::{Collection, CollectionStack, DictKey};
 use crate::scope::Scope;
@@ -22,14 +23,18 @@ pub use error::EncodeError;
 pub struct NullValue;
 pub struct UndefinedValue;
 
+mod private {
+    pub trait Sealed {}
+}
+
 // Implementations are in the `encodable` module
 /// This trait is required for a value to be written to the `Encoder`.
-pub trait Encodable {
+pub trait Encodable: private::Sealed {
     /// Write self to the given writer, encoded as Fleece. Return [`None`] if any write operations fail.
     /// Return [`Some`] with the number of bytes written if the value was written successfully.
     /// # Errors
     /// Any IO errors produced by the `writer`.
-    fn write_fleece_to(&self, vec: &mut Vec<u8>, is_wide: bool) -> usize;
+    fn write_fleece_to(&self, buf: &mut [u8], is_wide: bool) -> Option<NonZeroUsize>;
     /// The number of bytes necessary to encode this value in Fleece.
     fn fleece_size(&self) -> usize;
     /// Construct a [`SizedValue`] from this value, if this value can be represented in 2 bytes of Fleece. Otherwise,
@@ -112,9 +117,8 @@ impl Encoder {
             self._push(val)
         } else {
             // Otherwise, write it to output and push a pointer to it onto the current collection
-            let offset = self._write(value, false);
-            let pointer =
-                SizedValue::new_temp_pointer(offset).ok_or(EncodeError::PointerTooLarge)?;
+            let offset = self._write(value, false, false);
+            let pointer = SizedValue::new_pointer(offset).ok_or(EncodeError::PointerTooLarge)?;
             self._push(pointer)
         }
     }
@@ -200,12 +204,12 @@ impl Encoder {
         let is_wide = self._array_should_be_wide(&array);
 
         // Write the Array header via `Encodable` trait
-        let offset = self._write(&array, is_wide);
+        let offset = self._write(&array, is_wide, true);
 
         self._fix_array_pointers(&mut array, is_wide);
 
         for v in &array.values {
-            self._write(v, is_wide);
+            self._write(v, is_wide, false);
         }
 
         self._finished_collection(offset)?;
@@ -246,7 +250,7 @@ impl Encoder {
         let is_wide = self._dict_should_be_wide(&dict);
 
         // Write the Dict header via `Encodable` trait
-        let offset = self._write(&dict, is_wide);
+        let offset = self._write(&dict, is_wide, true);
 
         dict.values
             .sort_unstable_by(|elem1, elem2| Encoder::dict_key_cmp(&elem1.key, &elem2.key));
@@ -255,29 +259,29 @@ impl Encoder {
 
         for elem in &dict.values {
             match &elem.key {
-                DictKey::Inline(val) => self._write(val, is_wide),
+                DictKey::Inline(val) => self._write(val, is_wide, false),
                 DictKey::Shared(int_key) => {
                     let Some(val) = int_key.to_sized_value() else {
                         unreachable!()
                     };
-                    self._write(&val, is_wide)
+                    self._write(&val, is_wide, false)
                 }
                 DictKey::Pointer(_, offset) => {
                     if is_wide {
                         let Some(val) = SizedValue::new_wide_pointer(*offset) else {
                             return Err(EncodeError::PointerTooLarge);
                         };
-                        self._write(&val, is_wide)
+                        self._write(&val, is_wide, false)
                     } else {
                         #[allow(clippy::cast_possible_truncation)]
                         let Some(val) = SizedValue::new_narrow_pointer(*offset as u16) else {
                             return Err(EncodeError::PointerTooLarge);
                         };
-                        self._write(&val, is_wide)
+                        self._write(&val, is_wide, false)
                     }
                 }
             };
-            self._write(&elem.val, is_wide);
+            self._write(&elem.val, is_wide, false);
         }
 
         #[allow(clippy::cast_possible_truncation)]
@@ -328,10 +332,25 @@ impl Encoder {
     // are evenly aligned.
     /// Write a value to the output buffer and return the offset at which it was written.
     /// The offset can be used to create a pointer to the value.
-    fn _write<T: Encodable + ?Sized>(&mut self, value: &T, is_wide: bool) -> u32 {
-        #[allow(clippy::cast_possible_truncation)]
+    fn _write<T: Encodable + ?Sized>(
+        &mut self,
+        value: &T,
+        is_wide: bool,
+        is_collection: bool,
+    ) -> u32 {
         let offset = self.out.len();
-        value.write_fleece_to(&mut self.out, is_wide);
+        let size_required = if is_wide && !is_collection {
+            value.fleece_size().max(4)
+        } else {
+            value.fleece_size()
+        };
+        self.out.extend(core::iter::repeat(0).take(size_required));
+        let written =
+            value.write_fleece_to(&mut self.out[offset..(offset + size_required)], is_wide);
+        assert_eq!(
+            written,
+            Some(unsafe { NonZeroUsize::new_unchecked(size_required) })
+        );
         // Pad to even
         if self.out.len() % 2 != 0 {
             self.out.push(0);
@@ -370,7 +389,7 @@ impl Encoder {
 
     fn _write_key_pointer(&mut self, key: &str) -> Result<()> {
         // If we don't have shared keys, write the key to the output buffer and add a pointer to it in the Dict
-        let offset = self._write(key, false);
+        let offset = self._write(key, false, false);
         let Some(Collection::Dict(dict)) = self.collection_stack.top_mut() else {
             return Err(EncodeError::DictNotOpen);
         };
@@ -472,17 +491,10 @@ impl Encoder {
     }
 
     #[allow(clippy::cast_possible_truncation)]
-    fn _fix_pointer(temp_pointer: &SizedValue, len: u32, is_wide: bool) -> SizedValue {
-        // Make sure pointers don't get truncated
-        let pointer = if temp_pointer.is_wide() {
-            temp_pointer.clone()
-        } else {
-            temp_pointer.narrow_pointer()
-        };
+    fn _fix_pointer(sized_pointer: &SizedValue, len: u32, is_wide: bool) -> SizedValue {
+        let pointer = ValuePointer::from_value(sized_pointer.as_value());
 
-        let pointer = ValuePointer::from_value(pointer.as_value());
-
-        let offset_from_start = unsafe { pointer.get_offset(temp_pointer.is_wide()) };
+        let offset_from_start = unsafe { pointer.get_offset(sized_pointer.is_wide()) };
         let offset = len - offset_from_start;
         if is_wide {
             SizedValue::new_wide_pointer(offset).expect("Pointer unexpectedly large")
@@ -493,8 +505,8 @@ impl Encoder {
 
     fn _finished_collection(&mut self, offset_from_start: u32) -> Result<()> {
         if let Some(collection) = self.collection_stack.top_mut() {
-            let pointer = SizedValue::new_temp_pointer(offset_from_start)
-                .ok_or(EncodeError::PointerTooLarge)?;
+            let pointer =
+                SizedValue::new_pointer(offset_from_start).ok_or(EncodeError::PointerTooLarge)?;
             match collection {
                 Collection::Dict(dict) => {
                     dict.push_value(pointer);
@@ -509,16 +521,16 @@ impl Encoder {
             let offset = self._actual_pointer_offset(offset_from_start);
             #[allow(clippy::cast_possible_truncation)]
             let root = if offset <= u32::from(pointer::MAX_NARROW) {
-                SizedValue::new_narrow_pointer(offset as u16)
+                SizedValue::new_narrow_pointer(offset as u16).unwrap()
             } else {
                 // The root value must be 2 bytes, so if the pointer to the top-level collection
                 // is 4 bytes wide, we need to write that, then write another 2-byte pointer to that
                 let inner_root =
-                    SizedValue::new_temp_pointer(offset).ok_or(EncodeError::PointerTooLarge)?;
-                self._write(&inner_root, true);
-                SizedValue::new_narrow_pointer(4)
+                    SizedValue::new_pointer(offset).ok_or(EncodeError::PointerTooLarge)?;
+                self._write(&inner_root, true, false);
+                SizedValue::new_narrow_pointer(4).unwrap()
             };
-            self._write(&root, false);
+            self._write(&root, false, false);
             self.top_collection_closed = true;
         }
         Ok(())
