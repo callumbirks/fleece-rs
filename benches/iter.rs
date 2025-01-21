@@ -1,6 +1,6 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
-use fleece::{Encoder, SharedKeys, Value};
+use fleece::{mutable::MutableArray, Encoder, SharedKeys, Value};
 
 const PERSON_ENCODED: &[u8] = include_bytes!("../1person.fleece");
 const PEOPLE_ENCODED: &[u8] = include_bytes!("../1000people.fleece");
@@ -29,6 +29,19 @@ fn iter_people(c: &mut Criterion) {
     });
 }
 
+fn iter_people_mutable(c: &mut Criterion) {
+    let array = Value::clone_from_bytes(black_box(PEOPLE_ENCODED))
+        .unwrap()
+        .to_array()
+        .unwrap();
+    let array = MutableArray::from(array);
+    c.bench_function("iter_people_mutable", |b| {
+        b.iter(|| {
+            assert_eq!(array.into_iter().count(), 1000);
+        });
+    });
+}
+
 fn iter_people_shared_keys(c: &mut Criterion) {
     let value = Value::from_bytes(PEOPLE_ENCODED).unwrap();
     let mut encoder = Encoder::new();
@@ -48,6 +61,7 @@ criterion_group!(
     iter_benches,
     iter_person,
     iter_people,
+    iter_people_mutable,
     iter_people_shared_keys
 );
 criterion_main!(iter_benches);

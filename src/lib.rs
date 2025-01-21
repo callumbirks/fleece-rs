@@ -8,7 +8,7 @@ pub mod alloced;
 mod de;
 pub mod encoder;
 pub mod error;
-//pub mod mutable;
+pub mod mutable;
 mod scope;
 #[cfg(feature = "serde")]
 mod ser;

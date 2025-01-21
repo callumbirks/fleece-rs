@@ -4,10 +4,27 @@ use crate::encoder::value_stack;
 use crate::encoder::{Encodable, NullValue, UndefinedValue};
 use crate::value::{array, varint};
 use crate::value::{pointer, SizedValue};
-use crate::{value, Result, Value, ValueType};
-use alloc::boxed::Box;
+use crate::{value, ValueType};
 
 // All the built-in implementations of [`Encodable`].
+
+impl<T: super::private::Sealed + ?Sized> super::private::Sealed for &T {}
+impl<T: Encodable + ?Sized> Encodable for &T {
+    #[inline]
+    fn write_fleece_to(&self, buf: &mut [u8], is_wide: bool) -> Option<NonZeroUsize> {
+        (*self).write_fleece_to(buf, is_wide)
+    }
+
+    #[inline]
+    fn fleece_size(&self) -> usize {
+        (*self).fleece_size()
+    }
+
+    #[inline]
+    fn to_sized_value(&self) -> Option<SizedValue> {
+        (*self).to_sized_value()
+    }
+}
 
 impl super::private::Sealed for i64 {}
 impl Encodable for i64 {
@@ -595,21 +612,5 @@ impl Encodable for value_stack::Dict {
 
     fn to_sized_value(&self) -> Option<SizedValue> {
         None
-    }
-}
-
-pub(crate) trait AsBoxedValue {
-    /// Encode `self` into Fleece and Box the resulting `Value`, returning it.
-    fn as_boxed_value(&self) -> Result<Box<Value>>;
-}
-
-impl<T> AsBoxedValue for T
-where
-    T: Encodable + ?Sized,
-{
-    fn as_boxed_value(&self) -> Result<Box<Value>> {
-        let mut buf: Box<[u8]> = core::iter::repeat(0).take(self.fleece_size()).collect();
-        self.write_fleece_to(&mut buf, false);
-        Ok(unsafe { core::mem::transmute::<Box<[u8]>, Box<Value>>(buf) })
     }
 }

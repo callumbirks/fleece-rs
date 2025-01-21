@@ -7,7 +7,6 @@ use core::{borrow::Borrow, fmt, ops::Deref, ptr::NonNull};
 /// A [`Value`] which manages its own memory. This can be constructed with [`Value::from_bytes_alloced`].
 /// If you have an [`AllocedValue`] and need an [`AllocedArray`] or [`AllocedDict`], you can use
 /// [`AllocedValue::to_array`] or [`AllocedValue::to_dict`] respectively.
-#[derive(Clone)]
 pub struct Alloced<T>
 where
     T: ?Sized,
@@ -98,6 +97,15 @@ impl AllocedDict {
     }
 }
 
+impl<T: ?Sized> Clone for Alloced<T> {
+    fn clone(&self) -> Self {
+        Self {
+            buf: self.buf.clone(),
+            value: self.value,
+        }
+    }
+}
+
 impl<T: ?Sized + fmt::Debug> fmt::Debug for Alloced<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Alloced")
@@ -126,11 +134,40 @@ where
     }
 }
 
+impl<T> Borrow<*const T> for Alloced<T>
+where
+    T: ?Sized,
+{
+    fn borrow(&self) -> &*const T {
+        &self.value
+    }
+}
+
 impl<T: ?Sized> Deref for Alloced<T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
         self.value()
+    }
+}
+
+impl<T: ?Sized> PartialEq for Alloced<T> {
+    fn eq(&self, other: &Self) -> bool {
+        core::ptr::addr_eq(self.value, other.value)
+    }
+}
+
+impl<T: ?Sized> Eq for Alloced<T> {}
+
+impl<T: ?Sized> PartialOrd for Alloced<T> {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl<T: ?Sized> Ord for Alloced<T> {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+        self.value.cast::<()>().cmp(&other.value.cast::<()>())
     }
 }
 

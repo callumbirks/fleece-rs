@@ -17,7 +17,6 @@ mod error;
 mod value_stack;
 
 use crate::alloced::AllocedValue;
-pub(crate) use encodable::AsBoxedValue;
 pub use error::EncodeError;
 
 pub struct NullValue;
@@ -72,7 +71,7 @@ impl Encoder {
     }
 
     #[must_use]
-    pub fn new_to_writer(out: Vec<u8>) -> Self {
+    pub fn new_to_vec(out: Vec<u8>) -> Self {
         Self {
             out,
             shared_keys: None,

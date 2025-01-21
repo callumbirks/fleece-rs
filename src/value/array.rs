@@ -1,4 +1,5 @@
 use core::fmt;
+use core::ops::Index;
 
 use crate::alloced::AllocedArray;
 use crate::value::pointer::Pointer;
@@ -193,6 +194,14 @@ impl Array {
         }
 
         Ok(())
+    }
+}
+
+impl Index<usize> for Array {
+    type Output = Value;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        self.get(index).expect("Index out of range")
     }
 }
 

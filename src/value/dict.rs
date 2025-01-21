@@ -7,7 +7,6 @@ use core::ops::Index;
 use super::array::Array;
 use super::{array, ValueType};
 use crate::alloced::AllocedDict;
-use crate::encoder::{AsBoxedValue, Encodable};
 use crate::scope::Scope;
 use crate::value::{self, Result, Value};
 use crate::SharedKeys;
@@ -16,6 +15,11 @@ use crate::SharedKeys;
 #[repr(transparent)]
 pub struct Dict {
     pub(crate) array: Array,
+}
+
+pub enum Key<'str> {
+    Shared(u16),
+    String(&'str str),
 }
 
 impl Dict {
@@ -81,7 +85,7 @@ impl Dict {
     where
         R: ?Sized + Borrow<str>,
     {
-        let key: Box<Value> = self.encode_key(key.borrow(), None)?;
+        let key = self.encode_key(key.borrow(), None);
 
         self._get(&key)
     }
@@ -92,14 +96,14 @@ impl Dict {
     where
         R: ?Sized + Borrow<str>,
     {
-        let key: Box<Value> = self.encode_key(key.borrow(), Some(shared_keys))?;
+        let key = self.encode_key(key.borrow(), Some(shared_keys));
 
         self._get(&key)
     }
 
     /// Get the value in this Dict which corresponds to the given encoded key. The key should be
     /// encoded using [`Dict::encode_key`].
-    fn _get(&self, key: &Value) -> Option<&Value> {
+    fn _get(&self, key: &Key) -> Option<&Value> {
         // We use binary search to find the key. This is possible because the dict keys are sorted.
         // This binary search implementation is borrowed from https://doc.rust-lang.org/std/vec/struct.Vec.html#method.binary_search_by
 
@@ -179,19 +183,17 @@ impl Dict {
     /// Otherwise, just convert the key to a Value.
     /// Shared Keys can be provided if the caller already has them, otherwise this function
     /// will attempt to locate relevant shared keys.
-    fn encode_key(&self, key: &str, shared_keys: Option<&SharedKeys>) -> Option<Box<Value>> {
-        if key.fleece_size() > 2 && self.uses_shared_keys() {
-            if let Some(shared_keys) = shared_keys {
-                if let Some(encoded) = shared_keys.encode(key) {
-                    return encoded.as_boxed_value().ok();
-                }
-            } else if let Some(shared_keys) = self.find_shared_keys() {
-                if let Some(encoded) = shared_keys.encode(key) {
-                    return encoded.as_boxed_value().ok();
-                }
+    fn encode_key<'str>(&self, key: &'str str, shared_keys: Option<&SharedKeys>) -> Key<'str> {
+        if let Some(shared_keys) = shared_keys {
+            if let Some(encoded) = shared_keys.encode(key) {
+                return Key::Shared(encoded);
+            }
+        } else if self.uses_shared_keys() {
+            if let Some(encoded) = self.find_shared_keys().and_then(|sk| sk.encode(key)) {
+                return Key::Shared(encoded);
             }
         }
-        key.as_boxed_value().ok()
+        Key::String(key)
     }
 
     #[inline]
@@ -206,7 +208,7 @@ impl Dict {
 
         let (first_key, _) = unsafe { self._get_unchecked(0) };
 
-        first_key.value_type() == ValueType::Short
+        matches!(first_key.value_type(), ValueType::Short)
     }
 
     #[must_use]

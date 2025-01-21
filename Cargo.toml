@@ -41,6 +41,10 @@ harness = false
 name = "iter"
 harness = false
 
+[[bench]]
+name = "fetch"
+harness = false
+
 [lints.clippy]
 pedantic = { priority = -1, level = "warn" }
 module_name_repetitions = "allow"

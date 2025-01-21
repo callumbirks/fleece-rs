@@ -417,11 +417,11 @@ impl Value {
             ValueType::Float | ValueType::Double32 => 6,
             ValueType::Double64 => 10,
             ValueType::String | ValueType::Data => {
-                let data = self._get_data();
-                if let Some(last) = data.last() {
-                    core::ptr::from_ref(last) as usize - self.bytes.as_ptr() as usize + 1
-                } else {
-                    0
+                let len = self._get_data().len();
+                match len {
+                    0 | 1 => 2,
+                    2..=0x0E => 1 + len,
+                    _ => 1 + varint::size_required(len as u64) + len,
                 }
             }
             // TODO: This is not correct for MutableArray / MutableDict
@@ -431,60 +431,29 @@ impl Value {
         }
     }
 
-    pub(crate) fn dict_key_cmp(value1: &Self, value2: &Self, is_wide: bool) -> Ordering {
-        debug_assert!(matches!(
-            value1.value_type(),
-            ValueType::String | ValueType::Pointer | ValueType::Short
-        ));
+    pub(crate) fn dict_key_cmp(value1: &dict::Key, value2: &Self, is_wide: bool) -> Ordering {
         debug_assert!(matches!(
             value2.value_type(),
             ValueType::String | ValueType::Pointer | ValueType::Short
         ));
-        let value_type1 = value1.value_type();
         let value_type2 = value2.value_type();
-        match (value_type1, value_type2) {
+        match (value1, value_type2) {
             // Inline strings
-            (ValueType::String, ValueType::String) => value1.to_str().cmp(value2.to_str()),
+            (dict::Key::String(key), ValueType::String) => (*key).cmp(value2.to_str()),
             // Pointers to strings
-            (ValueType::Pointer, ValueType::Pointer) => {
-                let val1 = unsafe {
-                    Pointer::from_value(value1)
-                        .deref_unchecked(is_wide)
-                        .to_str()
-                };
-                debug_assert_ne!(val1, "", "value1 is not a pointer to a string!");
+            (dict::Key::String(key), ValueType::Pointer) => {
                 let val2 = unsafe {
                     Pointer::from_value(value2)
                         .deref_unchecked(is_wide)
                         .to_str()
                 };
                 debug_assert_ne!(val2, "", "value2 is not a pointer to a string!");
-                val1.cmp(val2)
-            }
-            (ValueType::String, ValueType::Pointer) => {
-                let val2 = unsafe {
-                    Pointer::from_value(value2)
-                        .deref_unchecked(is_wide)
-                        .to_str()
-                };
-                debug_assert_ne!(val2, "", "value2 is not a pointer to a string!");
-                value1.to_str().cmp(val2)
-            }
-            (ValueType::Pointer, ValueType::String) => {
-                let val1 = unsafe {
-                    Pointer::from_value(value1)
-                        .deref_unchecked(is_wide)
-                        .to_str()
-                };
-                debug_assert_ne!(val1, "", "value1 is not a pointer to a string!");
-                val1.cmp(value2.to_str())
+                (*key).cmp(val2)
             }
             // SharedKeys
-            (ValueType::Short, ValueType::Short) => {
-                value1.to_unsigned_short().cmp(&value2.to_unsigned_short())
-            }
+            (dict::Key::Shared(key), ValueType::Short) => key.cmp(&value2.to_unsigned_short()),
             // SharedKeys are sorted first in the dict
-            (ValueType::Short, _) => Ordering::Less,
+            (dict::Key::Shared(_), _) => Ordering::Less,
             (_, ValueType::Short) => Ordering::Greater,
             _ => unreachable!(),
         }
