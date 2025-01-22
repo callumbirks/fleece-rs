@@ -101,14 +101,28 @@ impl ValueSlot {
         }
     }
 
-    pub fn array(&mut self) -> Option<&mut MutableArray> {
+    pub fn array(&self) -> Option<&MutableArray> {
+        match self {
+            ValueSlot::MutableArray(arr) => Some(arr.as_ref()),
+            _ => None,
+        }
+    }
+
+    pub fn dict(&self) -> Option<&MutableDict> {
+        match self {
+            ValueSlot::MutableDict(dict) => Some(dict.as_ref()),
+            _ => None,
+        }
+    }
+
+    pub fn array_mut(&mut self) -> Option<&mut MutableArray> {
         match self {
             ValueSlot::MutableArray(arr) => Some(arr.as_mut()),
             _ => None,
         }
     }
 
-    pub fn dict(&mut self) -> Option<&mut MutableDict> {
+    pub fn dict_mut(&mut self) -> Option<&mut MutableDict> {
         match self {
             ValueSlot::MutableDict(dict) => Some(dict.as_mut()),
             _ => None,

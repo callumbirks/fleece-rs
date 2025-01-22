@@ -3,12 +3,11 @@ use alloc::{
     string::{String, ToString},
     sync::Arc,
 };
-use core::{cmp, ops::Index, ptr::NonNull};
+use core::{cmp, ops::Index};
 
 use crate::{
     alloced::{AllocedDict, AllocedValue},
     encoder::Encodable,
-    value::array,
     Dict, Scope, SharedKeys, Value, ValueType,
 };
 
@@ -16,10 +15,9 @@ use super::{MutableArray, ValueSlot};
 
 #[derive(Debug)]
 pub struct MutableDict {
-    source: Option<AllocedDict>,
-    shared_keys: Option<Arc<SharedKeys>>,
     map: BTreeMap<Key, ValueSlot>,
     allocated_values: BTreeSet<AllocedValue>,
+    shared_keys: Option<Arc<SharedKeys>>,
 }
 
 impl MutableDict {
@@ -32,16 +30,8 @@ impl MutableDict {
 
     #[must_use]
     pub fn clone_from(source: &Dict) -> Self {
-        let mut this = Self::new();
-        if let Some(sk) = Scope::find_shared_keys(source.array.value.bytes.as_ptr()) {
-            this.shared_keys = Some(sk)
-        }
-        for (k, v) in source {
-            let slot = super::encode_fleece(&mut this.allocated_values, v, source.is_wide());
-            let key = this.encode_key(k);
-            this.map.insert(key, slot);
-        }
-        this
+        let shared_keys = Scope::find_shared_keys(source.array.value.bytes.as_ptr());
+        Self::copy_with_shared_keys(source, shared_keys)
     }
 
     /// Create a new, empty, mutable dict which uses the given shared keys to encode keys.
@@ -58,39 +48,44 @@ impl MutableDict {
     ///
     /// # Errors
     /// Returns `Err(())` if the scope does not have a [`Scope::root`], or the root is not a [`Dict`].
-    #[inline]
     pub fn from_scope(scope: &Scope) -> Result<Self, ()> {
-        Self::try_from(scope)
+        if let Some(source) = scope.root().and_then(AllocedValue::to_dict) {
+            Ok(Self::copy_with_shared_keys(
+                &source,
+                scope.shared_keys().cloned(),
+            ))
+        } else {
+            Err(())
+        }
+    }
+
+    fn copy_with_shared_keys(source: &Dict, shared_keys: Option<Arc<SharedKeys>>) -> Self {
+        let mut this = Self {
+            shared_keys,
+            ..Default::default()
+        };
+        for (k, v) in source {
+            let slot = super::encode_fleece(&mut this.allocated_values, v, source.is_wide());
+            let key = this.encode_key(k);
+            this.map.insert(key, slot);
+        }
+        this
     }
 
     #[inline]
     pub fn len(&self) -> usize {
-        if let Some(source) = &self.source {
-            source.len() + self.map.len()
-        } else {
-            self.map.len()
-        }
+        self.map.len()
     }
 
     #[inline]
     pub fn is_empty(&self) -> bool {
-        if let Some(source) = &self.source {
-            source.is_empty() && self.map.is_empty()
-        } else {
-            self.map.is_empty()
-        }
+        self.map.is_empty()
     }
 
     #[must_use]
-    pub fn get(&self, key: &str) -> Option<&Value> {
+    pub fn get<'r>(&'r self, key: &str) -> Option<Ref<'r>> {
         let encoded_key = self.encode_key(key);
-        if let Some(val) = self.map.get(&encoded_key) {
-            val.value()
-        } else if let Some(source) = &self.source {
-            source.get(key)
-        } else {
-            None
-        }
+        self.map.get(&encoded_key).map(Ref::new)
     }
 
     #[must_use]
@@ -99,25 +94,12 @@ impl MutableDict {
             return None;
         }
         let encoded_key = self.encode_key(key);
-        if let Some(_) = self.map.get(&encoded_key) {
-            // If we already have a new value for this key, return a reference to it.
+
+        if self.map.contains_key(&encoded_key) {
             Some(RefMut {
                 dict: self,
                 key: encoded_key,
             })
-        } else if let Some(source) = &self.source {
-            // If this key only exists in the source dict, copy and create a ValueSlot for it, and return a reference to it.
-            if let Some(v) = source.get(key) {
-                let is_wide = self.is_wide();
-                let slot = super::encode_fleece(&mut self.allocated_values, v, is_wide);
-                self.map.insert(encoded_key.clone(), slot);
-                Some(RefMut {
-                    dict: self,
-                    key: encoded_key,
-                })
-            } else {
-                None
-            }
         } else {
             None
         }
@@ -126,7 +108,8 @@ impl MutableDict {
     #[inline]
     #[must_use]
     pub fn contains_key(&self, key: &str) -> bool {
-        self.get(key).is_some()
+        let encoded_key = self.encode_key(key);
+        self.map.contains_key(&encoded_key)
     }
 
     /// Set a key in the dictionary to the given value. This inserts if it doesn't exist, or updates if it does.
@@ -146,15 +129,10 @@ impl MutableDict {
 
     pub fn remove(&mut self, key: &str) {
         let encoded_key = self.encode_key(key);
-        if !self.map.contains_key(&encoded_key)
-            && self
-                .source
-                .as_ref()
-                .is_some_and(|source| !source.contains_key(key))
-        {
+        if !self.map.contains_key(&encoded_key) {
             return;
         }
-        self.map.insert(encoded_key, ValueSlot::Empty);
+        self.map.remove(&encoded_key);
     }
 
     fn encode_key(&self, key: &str) -> Key {
@@ -164,45 +142,14 @@ impl MutableDict {
             .map(Key::Shared)
             .unwrap_or_else(|| Key::String(key.to_string()))
     }
-
-    fn is_wide(&self) -> bool {
-        self.source.as_ref().map(|s| s.is_wide()).unwrap_or(false)
-    }
 }
 
 pub struct Iter<'a> {
-    source_iter: Option<array::Iter<'a>>,
     map_iter: btree_map::Iter<'a, Key, ValueSlot>,
     shared_keys: Option<Arc<SharedKeys>>,
-    next_source_key: Option<NonNull<Value>>,
-    next_map_entry: Option<(NonNull<Key>, NonNull<ValueSlot>)>,
 }
 
 impl Iter<'_> {
-    fn get_next_source_key(&mut self) -> Option<NonNull<Value>> {
-        self.source_iter.as_mut()?.next().map(NonNull::from)
-    }
-
-    fn get_next_map_entry(&mut self) -> Option<(NonNull<Key>, NonNull<ValueSlot>)> {
-        self.map_iter
-            .next()
-            .map(|(k, v)| (NonNull::from(k), NonNull::from(v)))
-    }
-
-    fn decode_vk<'vk>(&self, vk: &'vk Value) -> Option<&'vk str> {
-        match vk.value_type() {
-            ValueType::Short => unsafe {
-                self.shared_keys.as_ref().and_then(|sk| {
-                    Some(&*core::ptr::from_ref::<str>(
-                        sk.decode(vk.to_unsigned_short())?,
-                    ))
-                })
-            },
-            ValueType::String => Some(vk.to_str()),
-            _ => unreachable!(),
-        }
-    }
-
     fn decode_k<'k>(&self, k: &'k Key) -> Option<&'k str> {
         match k {
             Key::Shared(shared) => unsafe {
@@ -216,101 +163,29 @@ impl Iter<'_> {
 }
 
 impl<'a> Iterator for Iter<'a> {
-    type Item = (&'a str, &'a Value);
+    type Item = (&'a str, Ref<'a>);
 
     fn next(&mut self) -> Option<Self::Item> {
-        let mut source_key = self.next_source_key;
-        let mut map_entry = self.next_map_entry;
-
-        unsafe {
-            // Skip all empty entries from `map`, and skip entries in `source` which
-            // have the same key as empty entries from `map`.
-            while map_entry.is_some_and(|(_, v)| v.as_ref().is_empty()) {
-                let map_key = map_entry.map(|(k, _)| k.as_ref()).unwrap();
-                while source_key
-                    .is_some_and(|sk| self.decode_vk(sk.as_ref()).eq(&self.decode_k(map_key)))
-                {
-                    source_key = self.get_next_source_key();
-                }
-                map_entry = self.get_next_map_entry();
-            }
-        }
-
-        if let Some(source_key) = source_key {
-            let source_key = unsafe { source_key.as_ref() };
-            if let Some((map_key, map_value)) = map_entry {
-                let map_key = unsafe { map_key.as_ref() };
-
-                if map_key <= source_key {
-                    let key = self.decode_k(map_key)?;
-                    self.next_map_entry = self.get_next_map_entry();
-
-                    if map_key == source_key {
-                        // Discard current source key and next source value because Map had the same key
-                        let _ = self.source_iter.as_mut().and_then(array::Iter::next);
-                        self.next_source_key = self.get_next_source_key();
-                    }
-
-                    // Unwrap is safe because we previously skipped all empty values
-                    Some((key, unsafe { map_value.as_ref().value().unwrap() }))
-                } else {
-                    let key = self.decode_vk(source_key)?;
-                    let value = self.source_iter.as_mut().and_then(array::Iter::next)?;
-                    self.next_source_key = self.get_next_source_key();
-                    Some((key, value))
-                }
-            } else {
-                let key = self.decode_vk(source_key)?;
-                let value = self.source_iter.as_mut().and_then(array::Iter::next)?;
-                self.next_source_key = self.get_next_source_key();
-                Some((key, value))
-            }
-        } else if let Some((map_key, map_value)) = map_entry {
-            let map_key = unsafe { map_key.as_ref() };
-            match map_key {
-                Key::Shared(_) => None,
-                Key::String(key) => {
-                    self.next_map_entry = self.get_next_map_entry();
-                    // Unwrap is safe because we previously skipped all empty values
-                    Some((key.as_str(), unsafe { map_value.as_ref().value().unwrap() }))
-                }
-            }
-        } else {
-            None
-        }
+        self.map_iter
+            .next()
+            .and_then(|(key, slot)| Some((self.decode_k(key)?, Ref { slot })))
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let source_len = match self.source_iter.as_ref().map(array::Iter::size_hint) {
-            Some((len, _)) => len,
-            None => 0,
-        };
-        (source_len, Some(source_len + self.map_iter.len()))
+        self.map_iter.size_hint()
     }
 }
 
 impl<'a> IntoIterator for &'a MutableDict {
-    type Item = (&'a str, &'a Value);
+    type Item = (&'a str, Ref<'a>);
 
     type IntoIter = Iter<'a>;
 
     fn into_iter(self) -> Self::IntoIter {
-        let mut source_iter = self.source.as_ref().map(|s| s.array.iter());
-        let next_source_key = source_iter
-            .as_mut()
-            .and_then(array::Iter::next)
-            .map(NonNull::from);
-        let mut map_iter = self.map.iter();
-        let next_map_entry = map_iter
-            .next()
-            .map(|(k, v)| (NonNull::from(k), NonNull::from(v)));
-
+        let map_iter = self.map.iter();
         Iter {
-            source_iter,
             map_iter,
             shared_keys: self.shared_keys.clone(),
-            next_source_key,
-            next_map_entry,
         }
     }
 }
@@ -319,10 +194,9 @@ impl Default for MutableDict {
     #[inline]
     fn default() -> Self {
         Self {
-            source: None,
-            shared_keys: None,
             map: BTreeMap::default(),
             allocated_values: BTreeSet::default(),
+            shared_keys: None,
         }
     }
 }
@@ -330,7 +204,6 @@ impl Default for MutableDict {
 impl Clone for MutableDict {
     fn clone(&self) -> Self {
         let mut new = Self {
-            source: self.source.clone(),
             shared_keys: self.shared_keys.clone(),
             ..Default::default()
         };
@@ -349,9 +222,43 @@ impl Clone for MutableDict {
     }
 }
 
+pub struct Ref<'a> {
+    slot: &'a ValueSlot,
+}
+
 pub struct RefMut<'a> {
     dict: &'a mut MutableDict,
     key: Key,
+}
+
+impl<'a> Ref<'a> {
+    fn new(slot: &'a ValueSlot) -> Self {
+        Self { slot }
+    }
+
+    pub fn is_value(&self) -> bool {
+        self.slot.is_inline() || self.slot.is_pointer()
+    }
+
+    pub fn is_array(&self) -> bool {
+        self.slot.is_array()
+    }
+
+    pub fn is_dict(&self) -> bool {
+        self.slot.is_dict()
+    }
+
+    pub fn value(&self) -> Option<&Value> {
+        self.slot.value()
+    }
+
+    pub fn array(&self) -> Option<&MutableArray> {
+        self.slot.array()
+    }
+
+    pub fn dict(&self) -> Option<&MutableDict> {
+        self.slot.dict()
+    }
 }
 
 impl<'a> RefMut<'a> {
@@ -360,11 +267,11 @@ impl<'a> RefMut<'a> {
     }
 
     pub fn array(&mut self) -> Option<&mut MutableArray> {
-        self.slot_mut().array()
+        self.slot_mut().array_mut()
     }
 
     pub fn dict(&mut self) -> Option<&mut MutableDict> {
-        self.slot_mut().dict()
+        self.slot_mut().dict_mut()
     }
 
     pub fn set<T>(&mut self, value: T)
@@ -375,8 +282,12 @@ impl<'a> RefMut<'a> {
     }
 
     pub fn set_fleece(&mut self, value: &Value) {
-        let is_wide = self.dict.is_wide();
-        *self.slot_mut() = super::encode_fleece(&mut self.dict.allocated_values, value, is_wide)
+        // We can't safely dereference a 'dangling' pointer as only the parent of the pointer knows its width,
+        // so don't allow setting a value from a pointer.
+        if matches!(value.value_type(), ValueType::Pointer) {
+            return;
+        }
+        *self.slot_mut() = super::encode_fleece(&mut self.dict.allocated_values, value, false);
     }
 
     pub fn remove(mut self) {
@@ -392,23 +303,10 @@ impl<'a> RefMut<'a> {
     }
 }
 
-impl Index<&str> for MutableDict {
-    type Output = Value;
-
-    fn index(&self, index: &str) -> &Self::Output {
-        self.get(index)
-            .unwrap_or_else(|| panic!("Dict contains no key '{}'", index))
-    }
-}
-
 impl From<AllocedDict> for MutableDict {
     fn from(source: AllocedDict) -> Self {
         let shared_keys = Scope::find_shared_keys(source.value as *const u8);
-        Self {
-            source: Some(source),
-            shared_keys,
-            ..Default::default()
-        }
+        Self::copy_with_shared_keys(&source, shared_keys)
     }
 }
 
@@ -419,16 +317,9 @@ impl TryFrom<&Scope> for MutableDict {
     ///
     /// # Errors
     /// Returns `Err(())` if the scope does not have a [`Scope::root`], or the root is not a [`Dict`].
+    #[inline]
     fn try_from(scope: &Scope) -> Result<Self, Self::Error> {
-        if let Some(source) = scope.root().and_then(AllocedValue::to_dict) {
-            Ok(Self {
-                source: Some(source),
-                shared_keys: scope.shared_keys().cloned(),
-                ..Default::default()
-            })
-        } else {
-            Err(())
-        }
+        Self::from_scope(scope)
     }
 }
 

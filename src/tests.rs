@@ -253,10 +253,10 @@ fn mutable_dict() {
         .unwrap();
     let mut dict = MutableDict::from(dict);
     let age = dict.get("age").unwrap();
-    assert_eq!(age.to_short(), 30);
+    assert_eq!(age.value().unwrap().to_short(), 30);
     dict.set("age", &52);
     let age = dict.get("age").unwrap();
-    assert_eq!(age.to_short(), 52);
+    assert_eq!(age.value().unwrap().to_short(), 52);
     dict.remove("age");
     assert!(!dict.contains_key("age"));
 
@@ -280,17 +280,19 @@ fn mutable_array() {
     let mut array = MutableArray::from(array);
 
     for (i, string) in strings.iter().enumerate() {
-        assert_eq!(array.get(i).map(|v| v.to_str()), Some(*string));
+        let r = array.get(i).unwrap();
+        let v = r.value().unwrap();
+        assert_eq!(v.to_str(), *string);
     }
 
     assert!(array.push("Seven").to_str() == "Seven");
     array.remove(2);
-    assert_eq!(array[2].to_str(), "Three");
+    assert_eq!(array.get(2).unwrap().value().unwrap().to_str(), "Three");
     assert_eq!(array.len(), 7);
 
     let new_array = array.clone();
-    assert_eq!(new_array[2].to_str(), "Three");
-    assert_eq!(new_array[6].to_str(), "Seven");
+    assert_eq!(new_array.get(2).unwrap().value().unwrap().to_str(), "Three");
+    assert_eq!(new_array.get(6).unwrap().value().unwrap().to_str(), "Seven");
 }
 
 #[test]
@@ -310,18 +312,31 @@ fn nested_mutable_dict() {
     let dict = encoder.finish_value().to_dict().unwrap();
 
     let mut dict = MutableDict::from(dict);
-    let mut contact = dict.get_mut("contact").unwrap();
+    let contact = dict.get("contact").unwrap();
+    let contact_dict = contact.dict().unwrap();
     assert_eq!(
-        contact.dict().unwrap()["email"].to_str(),
+        contact_dict.get("email").unwrap().value().unwrap().to_str(),
         "contact@jeffbaggins.com"
     );
     assert_eq!(
-        contact.dict().unwrap()["phone_number"].to_str(),
+        contact_dict
+            .get("phone_number")
+            .unwrap()
+            .value()
+            .unwrap()
+            .to_str(),
         "+1 234 56789"
     );
-    contact.dict().unwrap().set("Address", "3250 Olcott St");
+    let mut contact = dict.get_mut("contact").unwrap();
+    let contact_dict = contact.dict().unwrap();
+    contact_dict.set("Address", "3250 Olcott St");
     assert_eq!(
-        contact.dict().unwrap()["Address"].to_str(),
+        contact_dict
+            .get("Address")
+            .unwrap()
+            .value()
+            .unwrap()
+            .to_str(),
         "3250 Olcott St"
     );
 }
@@ -340,8 +355,30 @@ fn nested_mutable_array() {
     encoder.end_array().unwrap();
     let array = encoder.finish_value().to_array().unwrap();
 
+    println!("NESTED MUTABLE ARRAY: {:?}", &array);
+
     let mut array = MutableArray::from(array);
+    let profile = array.get(1).unwrap();
+    let profile_dict = profile.dict().unwrap();
+    assert_eq!(
+        profile_dict.get("name").unwrap().value().unwrap().to_str(),
+        "Jeff"
+    );
+    assert_eq!(
+        profile_dict.get("age").unwrap().value().unwrap().to_short(),
+        35
+    );
+
     let mut profile = array.get_mut(1).unwrap();
-    assert_eq!(profile.dict().unwrap()["name"].to_str(), "Jeff");
-    assert_eq!(profile.dict().unwrap()["age"].to_short(), 35);
+    let profile_dict = profile.dict().unwrap();
+    profile_dict.set("Address", "3250 Olcott St");
+    assert_eq!(
+        profile_dict
+            .get("Address")
+            .unwrap()
+            .value()
+            .unwrap()
+            .to_str(),
+        "3250 Olcott St"
+    );
 }

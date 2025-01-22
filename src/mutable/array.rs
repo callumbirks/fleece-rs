@@ -1,19 +1,16 @@
-use core::ops::Index;
-
 use alloc::collections::BTreeSet;
 use alloc::vec::Vec;
 
 use crate::{
     alloced::{AllocedArray, AllocedValue},
     encoder::Encodable,
-    Array, Scope, Value,
+    Array, Scope, Value, ValueType,
 };
 
 use super::{MutableDict, ValueSlot};
 
 #[derive(Debug)]
 pub struct MutableArray {
-    source: Option<AllocedArray>,
     list: Vec<ValueSlot>,
     allocated_values: BTreeSet<AllocedValue>,
 }
@@ -39,39 +36,26 @@ impl MutableArray {
     ///
     /// # Errors
     /// Returns `Err(())` if the scope does not have a [`Scope::root`], or the root is not an [`Array`].
-    #[inline]
     pub fn from_scope(scope: &Scope) -> Result<Self, ()> {
-        Self::try_from(scope)
+        if let Some(source) = scope.root().and_then(AllocedValue::to_array) {
+            Ok(Self::clone_from(&source))
+        } else {
+            Err(())
+        }
     }
 
-    #[must_use]
-    pub fn get(&self, index: usize) -> Option<&Value> {
-        if index >= self.list.len() {
-            return None;
-        }
-        if let Some(value) = self.list[index].value() {
-            Some(value)
-        } else if let Some(source) = &self.source {
-            Some(&source[index])
+    #[inline]
+    pub fn get<'r>(&'r self, index: usize) -> Option<Ref<'r>> {
+        self.list.get(index).map(Ref::new)
+    }
+
+    #[inline]
+    pub fn get_mut<'r>(&'r mut self, index: usize) -> Option<RefMut<'r>> {
+        if index < self.list.len() {
+            Some(RefMut { array: self, index })
         } else {
             None
         }
-    }
-
-    pub fn get_mut<'r>(&'r mut self, index: usize) -> Option<RefMut<'r>> {
-        if index >= self.list.len() {
-            return None;
-        }
-        if self.list[index].is_empty() {
-            let source = self
-                .source
-                .clone()
-                .expect("If a slot is empty, it is delegating to source");
-            // If the slot is empty (we are delegating to source), copy the source value into the slot
-            self.list[index] =
-                super::encode_fleece(&mut self.allocated_values, &source[index], source.is_wide());
-        }
-        Some(RefMut { array: self, index })
     }
 
     #[inline]
@@ -111,38 +95,52 @@ impl MutableArray {
         if index >= self.list.len() {
             return;
         }
-        // Copy all of the elements after `index` from the source array to the new list.
-        self.copy_source(index + 1);
         // Remove elem at `index` from the new list.
         let slot = self.list.remove(index);
-        if slot.is_pointer() {
-            // Deallocate the allocated value
-            if let Some(pointer) = slot.pointer() {
-                self.allocated_values.remove(&pointer);
-            }
+        // If the Value is a pointer, deallocate the Value it points to
+        if let Some(pointer) = slot.pointer() {
+            self.allocated_values.remove(&pointer);
         }
     }
+}
 
-    fn is_wide(&self) -> bool {
-        self.source.as_ref().map(|s| s.is_wide()).unwrap_or(false)
-    }
-
-    fn copy_source(&mut self, from_index: usize) {
-        let Some(source) = self.source.clone() else {
-            return;
-        };
-        let is_wide = source.is_wide();
-        for (i, value) in source.iter().enumerate().skip(from_index) {
-            if self.list[i].is_empty() {
-                self.list[i] = super::encode_fleece(&mut self.allocated_values, value, is_wide);
-            }
-        }
-    }
+pub struct Ref<'a> {
+    slot: &'a ValueSlot,
 }
 
 pub struct RefMut<'a> {
     array: &'a mut MutableArray,
     index: usize,
+}
+
+impl<'a> Ref<'a> {
+    fn new(slot: &'a ValueSlot) -> Self {
+        Self { slot }
+    }
+
+    pub fn is_value(&self) -> bool {
+        self.slot.is_inline() || self.slot.is_pointer()
+    }
+
+    pub fn is_array(&self) -> bool {
+        self.slot.is_array()
+    }
+
+    pub fn is_dict(&self) -> bool {
+        self.slot.is_dict()
+    }
+
+    pub fn value(&self) -> Option<&Value> {
+        self.slot.value()
+    }
+
+    pub fn array(&self) -> Option<&MutableArray> {
+        self.slot.array()
+    }
+
+    pub fn dict(&self) -> Option<&MutableDict> {
+        self.slot.dict()
+    }
 }
 
 impl<'a> RefMut<'a> {
@@ -154,11 +152,11 @@ impl<'a> RefMut<'a> {
     }
 
     pub fn array(&mut self) -> Option<&mut MutableArray> {
-        self.slot_mut().array()
+        self.slot_mut().array_mut()
     }
 
     pub fn dict(&mut self) -> Option<&mut MutableDict> {
-        self.slot_mut().dict()
+        self.slot_mut().dict_mut()
     }
 
     pub fn set<T>(&mut self, value: T)
@@ -169,8 +167,12 @@ impl<'a> RefMut<'a> {
     }
 
     pub fn set_fleece(&mut self, value: &Value) {
-        let is_wide = self.array.is_wide();
-        *self.slot_mut() = super::encode_fleece(&mut self.array.allocated_values, value, is_wide);
+        // We can't safely dereference a 'dangling' pointer as only the parent of the pointer knows its width,
+        // so don't allow setting a value from a pointer.
+        if matches!(value.value_type(), ValueType::Pointer) {
+            return;
+        }
+        *self.slot_mut() = super::encode_fleece(&mut self.array.allocated_values, value, false);
     }
 
     pub fn remove(mut self) {
@@ -192,7 +194,7 @@ pub struct Iter<'a> {
 }
 
 impl<'a> Iterator for Iter<'a> {
-    type Item = &'a Value;
+    type Item = Ref<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let i = self.index;
@@ -207,7 +209,7 @@ impl<'a> Iterator for Iter<'a> {
 }
 
 impl<'a> IntoIterator for &'a MutableArray {
-    type Item = &'a Value;
+    type Item = Ref<'a>;
     type IntoIter = Iter<'a>;
 
     fn into_iter(self) -> Self::IntoIter {
@@ -221,7 +223,6 @@ impl<'a> IntoIterator for &'a MutableArray {
 impl Default for MutableArray {
     fn default() -> Self {
         Self {
-            source: None,
             list: Vec::default(),
             allocated_values: BTreeSet::default(),
         }
@@ -230,16 +231,12 @@ impl Default for MutableArray {
 
 impl Clone for MutableArray {
     fn clone(&self) -> Self {
-        let mut new = Self {
-            source: self.source.clone(),
-            ..Default::default()
-        };
-        let is_wide = self.is_wide();
+        let mut new = Self::default();
         for v in &self.list {
             let slot = match v {
                 ValueSlot::Empty => ValueSlot::Empty,
                 ValueSlot::Pointer(_) | ValueSlot::Inline(_) => {
-                    super::encode_fleece(&mut new.allocated_values, v.value().unwrap(), is_wide)
+                    super::encode_fleece(&mut new.allocated_values, v.value().unwrap(), false)
                 }
                 ValueSlot::MutableArray(arr) => ValueSlot::MutableArray(arr.clone()),
                 ValueSlot::MutableDict(dict) => ValueSlot::MutableDict(dict.clone()),
@@ -250,37 +247,15 @@ impl Clone for MutableArray {
     }
 }
 
-impl Index<usize> for MutableArray {
-    type Output = Value;
-
-    fn index(&self, index: usize) -> &Self::Output {
-        self.get(index)
-            .unwrap_or_else(|| panic!("Index {} out of bounds for MutableArray", index))
-    }
-}
-
 impl From<AllocedArray> for MutableArray {
     fn from(source: AllocedArray) -> Self {
-        let list = core::iter::repeat(ValueSlot::Empty)
-            .take(source.len())
-            .collect();
-        Self {
-            source: Some(source),
-            list,
-            ..Default::default()
-        }
+        Self::clone_from(&source)
     }
 }
 
 impl From<&Array> for MutableArray {
     fn from(value: &Array) -> Self {
-        let list = core::iter::repeat(ValueSlot::Empty)
-            .take(value.len())
-            .collect();
-        Self {
-            list,
-            ..Default::default()
-        }
+        Self::clone_from(&value)
     }
 }
 
