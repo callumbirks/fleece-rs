@@ -252,17 +252,16 @@ fn mutable_dict() {
         .to_dict()
         .unwrap();
     let mut dict = MutableDict::from(dict);
-    let age = dict.get("age").unwrap();
-    assert_eq!(age.value().unwrap().to_short(), 30);
-    dict.set("age", &52);
-    let age = dict.get("age").unwrap();
-    assert_eq!(age.value().unwrap().to_short(), 52);
+    assert_eq!(dict["age"].to_short(), 30);
+    dict.insert("age", 52);
+    assert_eq!(dict["age"].to_short(), 52);
     dict.remove("age");
     assert!(!dict.contains_key("age"));
 
     let new_dict = dict.clone();
     assert!(!new_dict.contains_key("age"));
-    dict.set("age", &28);
+    dict.insert("age", 28);
+    assert_eq!(dict["age"].to_short(), 28);
 }
 
 #[test]
@@ -280,19 +279,18 @@ fn mutable_array() {
     let mut array = MutableArray::from(array);
 
     for (i, string) in strings.iter().enumerate() {
-        let r = array.get(i).unwrap();
-        let v = r.value().unwrap();
-        assert_eq!(v.to_str(), *string);
+        assert_eq!(array[i].to_str(), *string);
     }
 
-    assert!(array.push("Seven").to_str() == "Seven");
+    array.push("Seven");
+    assert!(array[array.len() - 1].to_str() == "Seven");
     array.remove(2);
-    assert_eq!(array.get(2).unwrap().value().unwrap().to_str(), "Three");
+    assert_eq!(array[2].to_str(), "Three");
     assert_eq!(array.len(), 7);
 
     let new_array = array.clone();
-    assert_eq!(new_array.get(2).unwrap().value().unwrap().to_str(), "Three");
-    assert_eq!(new_array.get(6).unwrap().value().unwrap().to_str(), "Seven");
+    assert_eq!(new_array[2].to_str(), "Three");
+    assert_eq!(new_array[6].to_str(), "Seven");
 }
 
 #[test]
@@ -312,33 +310,22 @@ fn nested_mutable_dict() {
     let dict = encoder.finish_value().to_dict().unwrap();
 
     let mut dict = MutableDict::from(dict);
-    let contact = dict.get("contact").unwrap();
-    let contact_dict = contact.dict().unwrap();
-    assert_eq!(
-        contact_dict.get("email").unwrap().value().unwrap().to_str(),
-        "contact@jeffbaggins.com"
-    );
-    assert_eq!(
-        contact_dict
-            .get("phone_number")
-            .unwrap()
-            .value()
-            .unwrap()
-            .to_str(),
-        "+1 234 56789"
-    );
-    let mut contact = dict.get_mut("contact").unwrap();
-    let contact_dict = contact.dict().unwrap();
-    contact_dict.set("Address", "3250 Olcott St");
-    assert_eq!(
-        contact_dict
-            .get("Address")
-            .unwrap()
-            .value()
-            .unwrap()
-            .to_str(),
-        "3250 Olcott St"
-    );
+    let contact_dict = dict.get_dict("contact").unwrap();
+    assert_eq!(contact_dict["email"].to_str(), "contact@jeffbaggins.com");
+    assert_eq!(contact_dict["phone_number"].to_str(), "+1 234 56789");
+
+    let contact_dict = dict.get_dict_mut("contact").unwrap();
+    contact_dict.insert("Address", "3250 Olcott St");
+    assert_eq!(contact_dict["Address"].to_str(), "3250 Olcott St");
+
+    let mut email = MutableArray::new();
+    email.push_fleece(&contact_dict["email"]);
+    email.push("jeff.baggins@example.com");
+    dict.insert_array("email", email);
+
+    let email = dict.get_array("email").unwrap();
+    assert_eq!(email[0].to_str(), "contact@jeffbaggins.com");
+    assert_eq!(email[1].to_str(), "jeff.baggins@example.com");
 }
 
 #[test]
@@ -358,27 +345,11 @@ fn nested_mutable_array() {
     println!("NESTED MUTABLE ARRAY: {:?}", &array);
 
     let mut array = MutableArray::from(array);
-    let profile = array.get(1).unwrap();
-    let profile_dict = profile.dict().unwrap();
-    assert_eq!(
-        profile_dict.get("name").unwrap().value().unwrap().to_str(),
-        "Jeff"
-    );
-    assert_eq!(
-        profile_dict.get("age").unwrap().value().unwrap().to_short(),
-        35
-    );
+    let profile_dict = array.get_dict(1).unwrap();
+    assert_eq!(profile_dict["name"].to_str(), "Jeff");
+    assert_eq!(profile_dict["age"].to_short(), 35);
 
-    let mut profile = array.get_mut(1).unwrap();
-    let profile_dict = profile.dict().unwrap();
-    profile_dict.set("Address", "3250 Olcott St");
-    assert_eq!(
-        profile_dict
-            .get("Address")
-            .unwrap()
-            .value()
-            .unwrap()
-            .to_str(),
-        "3250 Olcott St"
-    );
+    let profile_dict = array.get_dict_mut(1).unwrap();
+    profile_dict.insert("Address", "3250 Olcott St");
+    assert_eq!(profile_dict["Address"].to_str(), "3250 Olcott St");
 }

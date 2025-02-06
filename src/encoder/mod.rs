@@ -459,7 +459,7 @@ impl Encoder {
         let mut len = self.out.len() as u32;
         for elem in &mut array.values {
             if elem.value_type() == ValueType::Pointer {
-                *elem = Encoder::_fix_pointer(elem, len);
+                *elem = Encoder::_fix_pointer(*elem, len);
             }
             len += if is_wide { 4 } else { 2 };
         }
@@ -474,14 +474,14 @@ impl Encoder {
             }
             len += if is_wide { 4 } else { 2 };
             if elem.val.value_type() == ValueType::Pointer {
-                elem.val = Encoder::_fix_pointer(&elem.val, len);
+                elem.val = Encoder::_fix_pointer(elem.val, len);
             }
             len += if is_wide { 4 } else { 2 };
         }
     }
 
     #[allow(clippy::cast_possible_truncation)]
-    fn _fix_pointer(pointer: &SizedValue, len: u32) -> SizedValue {
+    fn _fix_pointer(pointer: SizedValue, len: u32) -> SizedValue {
         let offset = pointer.actual_pointer_offset(len as usize);
         SizedValue::new_pointer(offset).expect("Pointer unexpectedly large")
     }

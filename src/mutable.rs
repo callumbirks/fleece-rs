@@ -9,18 +9,24 @@ pub use dict::MutableDict;
 use crate::{
     alloced::AllocedValue,
     encoder::{Encodable, NullValue, UndefinedValue},
-    Value,
+    value, Value,
 };
 
 const INLINE_CAPACITY: usize = 15;
 
 #[derive(Debug, Clone)]
 enum ValueSlot {
-    Empty,
     Pointer(ValuePointer),
     Inline([u8; INLINE_CAPACITY]),
     MutableArray(Box<MutableArray>),
     MutableDict(Box<MutableDict>),
+}
+
+#[derive(Debug, Clone, Copy)]
+#[repr(packed(4))]
+struct ValuePointer {
+    ptr: *const u8,
+    len: u32,
 }
 
 impl ValueSlot {
@@ -28,11 +34,8 @@ impl ValueSlot {
     where
         T: Encodable,
     {
-        struct SizeCheck;
-        impl SizeCheck {
-            const CHECK: () = assert!(size_of::<ValueSlot>() == 16);
-        }
-        let _ = SizeCheck::CHECK;
+        // Ensure ValueSlot is 16 bytes
+        static_assertions::assert_eq_size!(ValueSlot, [u8; 16]);
 
         debug_assert!(value.fleece_size() <= INLINE_CAPACITY);
         let mut buf = [0u8; INLINE_CAPACITY];
@@ -43,14 +46,22 @@ impl ValueSlot {
     pub fn new_pointer(value: &Value) -> Self {
         let Ok(len) = u32::try_from(value.len()) else {
             #[cfg(debug_assertions)]
-            panic!("Overflow for Value len in `ValueSlot::new_pointer`");
+            Self::pointer_overflow_panic();
             #[cfg(not(debug_assertions))]
-            return Self::Empty;
+            return Self::_undefined();
         };
         Self::Pointer(ValuePointer {
             ptr: value.bytes.as_ptr(),
             len,
         })
+    }
+
+    pub fn new_dict(dict: MutableDict) -> Self {
+        Self::MutableDict(Box::new(dict))
+    }
+
+    pub fn new_array(array: MutableArray) -> Self {
+        Self::MutableArray(Box::new(array))
     }
 
     #[inline]
@@ -61,11 +72,6 @@ impl ValueSlot {
     #[inline]
     pub fn is_inline(&self) -> bool {
         matches!(self, ValueSlot::Inline(_))
-    }
-
-    #[inline]
-    pub fn is_empty(&self) -> bool {
-        matches!(self, ValueSlot::Empty)
     }
 
     #[inline]
@@ -80,14 +86,14 @@ impl ValueSlot {
 
     pub fn value(&self) -> Option<&Value> {
         match self {
-            ValueSlot::Empty => None,
             ValueSlot::Pointer(vp) => {
                 let slice = core::ptr::slice_from_raw_parts(vp.ptr, vp.len as usize);
-                Some(unsafe { core::mem::transmute(&*slice) })
+                Some(unsafe { &*(slice as *const Value) })
             }
-            ValueSlot::Inline(inline) => Some(unsafe { core::mem::transmute(inline.as_slice()) }),
-            ValueSlot::MutableArray(_) => None,
-            ValueSlot::MutableDict(_) => None,
+            ValueSlot::Inline(inline) => {
+                Some(unsafe { &*(core::ptr::from_ref::<[u8]>(inline.as_slice()) as *const Value) })
+            }
+            ValueSlot::MutableArray(_) | ValueSlot::MutableDict(_) => None,
         }
     }
 
@@ -95,7 +101,7 @@ impl ValueSlot {
         match self {
             ValueSlot::Pointer(vp) => {
                 let slice = core::ptr::slice_from_raw_parts(vp.ptr, vp.len as usize);
-                Some(unsafe { core::mem::transmute(slice) })
+                Some(slice as *const Value)
             }
             _ => None,
         }
@@ -128,6 +134,21 @@ impl ValueSlot {
             _ => None,
         }
     }
+
+    #[cold]
+    #[inline(never)]
+    fn _undefined() -> Self {
+        let mut i = [0u8; INLINE_CAPACITY];
+        i[0] = value::constants::UNDEFINED[0];
+        i[1] = value::constants::UNDEFINED[1];
+        Self::Inline(i)
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn pointer_overflow_panic() -> ! {
+        panic!("Overflow for Value len in `ValueSlot::new_pointer`");
+    }
 }
 
 fn encode<T>(allocated_values: &mut BTreeSet<AllocedValue>, value: T) -> ValueSlot
@@ -138,11 +159,17 @@ where
         ValueSlot::new_inline(value)
     } else {
         let mut buf: Box<[u8]> = core::iter::repeat(0).take(value.fleece_size()).collect();
+        #[cfg(debug_assertions)]
         value.write_fleece_to(&mut buf, false).expect(
             "Encoding should not fail because we allocated the buffer with the needed size.",
         );
+        #[cfg(not(debug_assertions))]
+        value
+            .write_fleece_to(&mut buf, false)
+            .unwrap_or_else(|| unsafe { core::hint::unreachable_unchecked() });
+
         let buf: Arc<[u8]> = Arc::from(buf);
-        let pointer = buf.as_ref() as *const [u8] as *const Value;
+        let pointer = core::ptr::from_ref(buf.as_ref()) as *const Value;
         let alloced = AllocedValue {
             buf,
             value: pointer,
@@ -168,7 +195,7 @@ fn encode_fleece(
         crate::ValueType::UnsignedInt => encode(allocated_values, value.to_unsigned_int()),
         crate::ValueType::Float => encode(allocated_values, value.to_float()),
         crate::ValueType::Double32 | crate::ValueType::Double64 => {
-            encode(allocated_values, &value.to_double())
+            encode(allocated_values, value.to_double())
         }
         crate::ValueType::String => encode(allocated_values, value.to_str()),
         crate::ValueType::Data => encode(allocated_values, value.to_data()),
@@ -186,31 +213,4 @@ fn encode_fleece(
             is_wide,
         ),
     }
-}
-
-#[derive(Clone)]
-struct ValueSlotInline {
-    val: [u8; INLINE_CAPACITY],
-}
-
-#[repr(u8)]
-enum InlineValue {
-    Value([u8; INLINE_CAPACITY]),
-    MutableArray(Box<MutableArray>),
-    MutableDict(Box<MutableDict>),
-}
-
-#[derive(Clone, Copy)]
-#[repr(u8)]
-enum InlineType {
-    Value,
-    MutableArray,
-    MutableDict,
-}
-
-#[derive(Debug, Clone, Copy)]
-#[repr(packed(4))]
-struct ValuePointer {
-    ptr: *const u8,
-    len: u32,
 }

@@ -478,7 +478,7 @@ impl Encodable for SizedValue {
         if self.value_type() == ValueType::Pointer {
             let offset = self.pointer_offset();
 
-            if offset > pointer::MAX_NARROW as u32 || is_wide {
+            if offset > u32::from(pointer::MAX_NARROW) || is_wide {
                 if buf.len() < 4 {
                     return None;
                 }
@@ -489,31 +489,37 @@ impl Encodable for SizedValue {
                 if buf.len() < 2 {
                     return None;
                 }
-                buf[0..2].copy_from_slice(&(offset as u16 >> 1).to_be_bytes());
+
+                #[cfg(debug_assertions)]
+                let offset =
+                    u16::try_from(offset).expect("offset should be <= pointer::MAX_NARROW");
+                #[cfg(not(debug_assertions))]
+                #[allow(clippy::cast_possible_truncation)]
+                let offset = offset as u16;
+
+                buf[0..2].copy_from_slice(&(offset >> 1).to_be_bytes());
                 buf[0] |= value::tag::POINTER;
                 unsafe { Some(NonZeroUsize::new_unchecked(2)) }
             }
-        } else {
-            if is_wide {
-                if buf.len() < 4 {
-                    return None;
-                }
-                buf[0..4].copy_from_slice(self.as_bytes());
-                unsafe { Some(NonZeroUsize::new_unchecked(4)) }
-            } else {
-                if buf.len() < 2 {
-                    return None;
-                }
-                buf[0..2].copy_from_slice(&self.as_bytes()[..2]);
-                buf[0] &= 0xBF;
-                unsafe { Some(NonZeroUsize::new_unchecked(2)) }
+        } else if is_wide {
+            if buf.len() < 4 {
+                return None;
             }
+            buf[0..4].copy_from_slice(self.as_bytes());
+            unsafe { Some(NonZeroUsize::new_unchecked(4)) }
+        } else {
+            if buf.len() < 2 {
+                return None;
+            }
+            buf[0..2].copy_from_slice(&self.as_bytes()[..2]);
+            buf[0] &= 0xBF;
+            unsafe { Some(NonZeroUsize::new_unchecked(2)) }
         }
     }
 
     fn fleece_size(&self) -> usize {
         if self.value_type() == ValueType::Pointer {
-            if self.pointer_offset() > pointer::MAX_NARROW as u32 {
+            if self.pointer_offset() > u32::from(pointer::MAX_NARROW) {
                 4
             } else {
                 2
@@ -524,7 +530,7 @@ impl Encodable for SizedValue {
     }
 
     fn to_sized_value(&self) -> Option<SizedValue> {
-        Some(self.clone())
+        Some(*self)
     }
 }
 
@@ -539,7 +545,6 @@ fn write_valuestack_collection(buf: &mut [u8], tag: u8, len: usize, is_wide: boo
     } else {
         tag | (inline_size >> 8) as u8
     };
-    let _first = buf[0];
     buf[1] = (inline_size & 0xFF) as u8;
 
     let written = if len >= array::VARINT_COUNT as usize {

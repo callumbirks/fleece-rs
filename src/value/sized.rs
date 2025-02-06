@@ -31,19 +31,20 @@ impl SizedValue {
 
     #[must_use]
     #[inline]
-    pub(crate) fn value_type(&self) -> ValueType {
+    pub(crate) fn value_type(self) -> ValueType {
         ValueType::from_byte(self.bytes[0])
     }
 
     #[inline]
-    pub(crate) fn pointer_offset(&self) -> u32 {
+    pub(crate) fn pointer_offset(self) -> u32 {
         let mut bytes = self.bytes;
         bytes[0] ^= tag::POINTER;
         u32::from_be_bytes(bytes)
     }
 
     #[inline]
-    pub(crate) fn actual_pointer_offset(&self, out_len: usize) -> u32 {
+    #[allow(clippy::cast_possible_truncation)]
+    pub(crate) fn actual_pointer_offset(self, out_len: usize) -> u32 {
         (out_len - self.pointer_offset() as usize) as u32
     }
 
