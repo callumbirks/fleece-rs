@@ -24,6 +24,8 @@ pub use de::Deserializer;
 pub use encoder::Encoder;
 pub use error::Error;
 pub use error::Result;
+pub use mutable::MutableArray;
+pub use mutable::MutableDict;
 pub use scope::Scope;
 #[cfg(feature = "serde")]
 pub use ser::to_bytes;
@@ -36,3 +38,61 @@ pub use value::array::Array;
 pub use value::dict::Dict;
 pub use value::Value;
 pub use value::ValueType;
+
+#[macro_export]
+macro_rules! fleece {
+    {
+        $($key:literal: $val:tt),* $(,)?
+    } => {unsafe {
+        let mut encoder = Encoder::new();
+        encoder.begin_dict().unwrap_unchecked();
+        $(fleece!(insert encoder => $key: $val);)*
+        encoder.end_dict().unwrap_unchecked();
+        encoder.finish_value().to_dict().unwrap()
+    }};
+
+    [
+        $($val:tt),* $(,)?
+    ] => {unsafe {
+        let mut encoder = Encoder::new();
+        encoder.begin_array(10).unwrap_unchecked();
+        $(fleece!(push encoder => $val);)*
+        encoder.end_array().unwrap_unchecked();
+        encoder.finish_value().to_array().unwrap_unchecked()
+    }};
+
+    (insert $encoder:expr => $key:literal: { $($inner_key:literal: $inner_val:tt),*$(,)? }) => {
+        $encoder.write_key($key).unwrap_unchecked();
+        $encoder.begin_dict().unwrap_unchecked();
+        $(fleece!(insert $encoder => $inner_key: $inner_val);)*
+        $encoder.end_dict().unwrap_unchecked();
+    };
+
+    (insert $encoder:expr => $key:literal: [ $($inner_val:tt),* $(,)? ]) => {
+        $encoder.write_key($key).unwrap_unchecked();
+        $encoder.begin_array(10).unwrap_unchecked();
+        $(fleece!(push $encoder => $inner_val);)*
+        $encoder.end_array().unwrap_unchecked();
+    };
+
+    (insert $encoder:expr => $key:literal: $val:expr) => {
+        $encoder.write_key($key).unwrap_unchecked();
+        $encoder.write_value($val).unwrap_unchecked();
+    };
+
+    (push $encoder:expr => { $($inner_key:literal: $inner_val:tt),* $(,)? }) => {
+        $encoder.begin_dict().unwrap_unchecked();
+        $(fleece!(insert $encoder => $inner_key: $inner_val);)*
+        $encoder.end_dict().unwrap_unchecked();
+    };
+
+    (push $encoder:expr => [ $($inner_val:tt),* $(,)? ]) => {
+        $encoder.begin_array().unwrap_unchecked();
+        $(fleece!(push $encoder => $inner_val);)*
+        $encoder.end_array().unwrap_unchecked();
+    };
+
+    (push $encoder:expr => $val:expr) => {
+        $encoder.write_value($val).unwrap_unchecked();
+    };
+}

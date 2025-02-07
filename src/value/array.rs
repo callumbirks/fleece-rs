@@ -5,6 +5,7 @@ use crate::alloced::AllocedArray;
 use crate::value::pointer::Pointer;
 use crate::value::{self, varint, Value, ValueType};
 use crate::value::{DecodeError, Result};
+use crate::MutableArray;
 
 #[repr(transparent)]
 pub struct Array {
@@ -42,6 +43,11 @@ impl Array {
     pub const fn empty() -> &'static Self {
         const EMPTY: [u8; 2] = [value::tag::ARRAY, 0];
         unsafe { core::mem::transmute(&EMPTY as &[u8]) }
+    }
+
+    #[must_use]
+    pub fn to_mutable(&self) -> MutableArray {
+        MutableArray::clone_from(self)
     }
 
     #[allow(clippy::transmute_ptr_to_ptr)]

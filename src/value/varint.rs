@@ -52,3 +52,25 @@ pub const fn size_required(value: u64) -> usize {
         (63 - value.leading_zeros()) as usize / 7 + 1
     }
 }
+
+#[cfg(test)]
+mod test {
+    use crate::value::varint;
+
+    fn varint_test(val: u64) {
+        let size_required = varint::size_required(val);
+        let mut buf: Vec<u8> = vec![0; size_required];
+        let _written = varint::write(&mut buf, val);
+        println!("Wrote varint {:02x?}", &buf);
+        let (_read, out_val) = varint::read(&buf);
+        assert_eq!(val, out_val);
+    }
+
+    #[test]
+    fn varint() {
+        varint_test(8_704_268);
+        varint_test(100_000);
+        varint_test(603);
+        varint_test(87);
+    }
+}

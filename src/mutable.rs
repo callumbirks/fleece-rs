@@ -1,59 +1,68 @@
 pub mod array;
 pub mod dict;
 
-use alloc::{boxed::Box, collections::BTreeSet, sync::Arc};
+use alloc::{boxed::Box, collections::BTreeSet, sync::Arc, vec::Vec};
 
 pub use array::MutableArray;
 pub use dict::MutableDict;
 
 use crate::{
-    alloced::AllocedValue,
     encoder::{Encodable, NullValue, UndefinedValue},
     value, Value,
 };
 
 const INLINE_CAPACITY: usize = 15;
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 enum ValueSlot {
-    Pointer(ValuePointer),
     Inline([u8; INLINE_CAPACITY]),
+    Pointer(Box<Value>),
     MutableArray(Box<MutableArray>),
     MutableDict(Box<MutableDict>),
 }
 
-#[derive(Debug, Clone, Copy)]
-#[repr(packed(4))]
-struct ValuePointer {
-    ptr: *const u8,
-    len: u32,
-}
-
 impl ValueSlot {
-    pub fn new_inline<T>(value: T) -> Self
+    pub fn new<T>(value: T) -> Self
     where
         T: Encodable,
     {
-        // Ensure ValueSlot is 16 bytes
-        static_assertions::assert_eq_size!(ValueSlot, [u8; 16]);
-
-        debug_assert!(value.fleece_size() <= INLINE_CAPACITY);
-        let mut buf = [0u8; INLINE_CAPACITY];
-        value.write_fleece_to(&mut buf, false);
-        Self::Inline(buf)
+        if value.fleece_size() <= INLINE_CAPACITY {
+            let mut buf = [0u8; INLINE_CAPACITY];
+            value.write_fleece_to(&mut buf, false);
+            Self::Inline(buf)
+        } else {
+            let mut buf: Box<[u8]> = core::iter::repeat(0u8).take(value.fleece_size()).collect();
+            value.write_fleece_to(&mut buf, false);
+            Self::Pointer(unsafe { core::mem::transmute(buf) })
+        }
     }
 
-    pub fn new_pointer(value: &Value) -> Self {
-        let Ok(len) = u32::try_from(value.len()) else {
-            #[cfg(debug_assertions)]
-            Self::pointer_overflow_panic();
-            #[cfg(not(debug_assertions))]
-            return Self::_undefined();
-        };
-        Self::Pointer(ValuePointer {
-            ptr: value.bytes.as_ptr(),
-            len,
-        })
+    pub fn new_from_fleece(value: &Value, is_wide: bool) -> Self {
+        match value.value_type() {
+            crate::ValueType::Null => Self::new(NullValue),
+            crate::ValueType::Undefined => Self::new(UndefinedValue),
+            crate::ValueType::False => Self::new(false),
+            crate::ValueType::True => Self::new(true),
+            crate::ValueType::Short => Self::new(value.to_short()),
+            crate::ValueType::Int => Self::new(value.to_int()),
+            crate::ValueType::UnsignedInt => Self::new(value.to_unsigned_int()),
+            crate::ValueType::Float => Self::new(value.to_float()),
+            crate::ValueType::Double32 | crate::ValueType::Double64 => Self::new(value.to_double()),
+            crate::ValueType::String => Self::new(value.to_str()),
+            crate::ValueType::Data => Self::new(value.to_data()),
+            crate::ValueType::Array => {
+                Self::new_array(MutableArray::clone_from(value.as_array().unwrap()))
+            }
+            crate::ValueType::Dict => {
+                Self::new_dict(MutableDict::clone_from(value.as_dict().unwrap()))
+            }
+            crate::ValueType::Pointer => Self::new_from_fleece(
+                unsafe {
+                    crate::value::pointer::Pointer::from_value(value).deref_unchecked(is_wide)
+                },
+                false,
+            ),
+        }
     }
 
     pub fn new_dict(dict: MutableDict) -> Self {
@@ -64,14 +73,8 @@ impl ValueSlot {
         Self::MutableArray(Box::new(array))
     }
 
-    #[inline]
-    pub fn is_pointer(&self) -> bool {
-        matches!(self, ValueSlot::Pointer(_))
-    }
-
-    #[inline]
-    pub fn is_inline(&self) -> bool {
-        matches!(self, ValueSlot::Inline(_))
+    pub fn is_value(&self) -> bool {
+        matches!(self, ValueSlot::Inline(_) | ValueSlot::Pointer(_))
     }
 
     #[inline]
@@ -86,24 +89,11 @@ impl ValueSlot {
 
     pub fn value(&self) -> Option<&Value> {
         match self {
-            ValueSlot::Pointer(vp) => {
-                let slice = core::ptr::slice_from_raw_parts(vp.ptr, vp.len as usize);
-                Some(unsafe { &*(slice as *const Value) })
-            }
+            ValueSlot::Pointer(vp) => Some(vp.as_ref()),
             ValueSlot::Inline(inline) => {
                 Some(unsafe { &*(core::ptr::from_ref::<[u8]>(inline.as_slice()) as *const Value) })
             }
             ValueSlot::MutableArray(_) | ValueSlot::MutableDict(_) => None,
-        }
-    }
-
-    pub fn pointer(&self) -> Option<*const Value> {
-        match self {
-            ValueSlot::Pointer(vp) => {
-                let slice = core::ptr::slice_from_raw_parts(vp.ptr, vp.len as usize);
-                Some(slice as *const Value)
-            }
-            _ => None,
         }
     }
 
@@ -151,66 +141,17 @@ impl ValueSlot {
     }
 }
 
-fn encode<T>(allocated_values: &mut BTreeSet<AllocedValue>, value: T) -> ValueSlot
-where
-    T: Encodable,
-{
-    if value.fleece_size() <= INLINE_CAPACITY {
-        ValueSlot::new_inline(value)
-    } else {
-        let mut buf: Box<[u8]> = core::iter::repeat(0).take(value.fleece_size()).collect();
-        #[cfg(debug_assertions)]
-        value.write_fleece_to(&mut buf, false).expect(
-            "Encoding should not fail because we allocated the buffer with the needed size.",
-        );
-        #[cfg(not(debug_assertions))]
-        value
-            .write_fleece_to(&mut buf, false)
-            .unwrap_or_else(|| unsafe { core::hint::unreachable_unchecked() });
-
-        let buf: Arc<[u8]> = Arc::from(buf);
-        let pointer = core::ptr::from_ref(buf.as_ref()) as *const Value;
-        let alloced = AllocedValue {
-            buf,
-            value: pointer,
-        };
-        allocated_values.insert(alloced);
-        let alloced: &AllocedValue = allocated_values.last().unwrap();
-        ValueSlot::new_pointer(alloced)
-    }
-}
-
-fn encode_fleece(
-    allocated_values: &mut BTreeSet<AllocedValue>,
-    value: &Value,
-    is_wide: bool,
-) -> ValueSlot {
-    match value.value_type() {
-        crate::ValueType::Null => encode(allocated_values, NullValue),
-        crate::ValueType::Undefined => encode(allocated_values, UndefinedValue),
-        crate::ValueType::False => encode(allocated_values, false),
-        crate::ValueType::True => encode(allocated_values, true),
-        crate::ValueType::Short => encode(allocated_values, value.to_short()),
-        crate::ValueType::Int => encode(allocated_values, value.to_int()),
-        crate::ValueType::UnsignedInt => encode(allocated_values, value.to_unsigned_int()),
-        crate::ValueType::Float => encode(allocated_values, value.to_float()),
-        crate::ValueType::Double32 | crate::ValueType::Double64 => {
-            encode(allocated_values, value.to_double())
+impl Clone for ValueSlot {
+    fn clone(&self) -> Self {
+        match self {
+            ValueSlot::Inline(i) => ValueSlot::Inline(*i),
+            ValueSlot::Pointer(p) => {
+                let mut buf: Box<[u8]> = core::iter::repeat(0u8).take(p.len()).collect();
+                buf.copy_from_slice(&p.bytes);
+                ValueSlot::Pointer(unsafe { core::mem::transmute(buf) })
+            }
+            ValueSlot::MutableArray(arr) => ValueSlot::MutableArray(arr.clone()),
+            ValueSlot::MutableDict(dict) => ValueSlot::MutableDict(dict.clone()),
         }
-        crate::ValueType::String => encode(allocated_values, value.to_str()),
-        crate::ValueType::Data => encode(allocated_values, value.to_data()),
-        crate::ValueType::Array => {
-            let source = value.as_array().unwrap();
-            ValueSlot::MutableArray(Box::new(MutableArray::clone_from(source)))
-        }
-        crate::ValueType::Dict => {
-            let source = value.as_dict().unwrap();
-            ValueSlot::MutableDict(Box::new(MutableDict::clone_from(source)))
-        }
-        crate::ValueType::Pointer => encode_fleece(
-            allocated_values,
-            unsafe { crate::value::pointer::Pointer::from_value(value).deref_unchecked(is_wide) },
-            is_wide,
-        ),
     }
 }

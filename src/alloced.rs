@@ -1,6 +1,6 @@
 use lazy_static::lazy_static;
 
-use crate::{value, Array, Dict, Value, ValueType};
+use crate::{encoder::Encodable, value, Array, Dict, Value, ValueType};
 use alloc::sync::Arc;
 use core::{borrow::Borrow, fmt, ops::Deref, ptr::NonNull};
 

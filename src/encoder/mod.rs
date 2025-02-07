@@ -101,10 +101,9 @@ impl Encoder {
     /// - If there is not an open collection (Array/Dict).
     /// - If the open collection is a Dict, and it is waiting for a key.
     /// - I/O Errors related to writing to this Encoder's writer.
-    pub fn write_value<R, T>(&mut self, value: &R) -> Result<()>
+    pub fn write_value<T>(&mut self, value: T) -> Result<()>
     where
-        R: Borrow<T> + ?Sized,
-        T: Encodable + ?Sized,
+        T: Encodable,
     {
         if self.collection_stack.empty() {
             return Err(EncodeError::CollectionNotOpen);
@@ -145,11 +144,11 @@ impl Encoder {
             ValueType::False => self._push(SizedValue::new_narrow(value::constants::FALSE)),
             ValueType::Null => self._push(SizedValue::new_narrow(value::constants::NULL)),
             ValueType::Undefined => self._push(SizedValue::new_narrow(value::constants::UNDEFINED)),
-            ValueType::Short => self.write_value(&value.to_short()),
-            ValueType::UnsignedInt => self.write_value(&value.to_unsigned_int()),
-            ValueType::Int => self.write_value(&value.to_int()),
-            ValueType::Float => self.write_value(&value.to_float()),
-            ValueType::Double32 | ValueType::Double64 => self.write_value(&value.to_double()),
+            ValueType::Short => self.write_value(value.to_short()),
+            ValueType::UnsignedInt => self.write_value(value.to_unsigned_int()),
+            ValueType::Int => self.write_value(value.to_int()),
+            ValueType::Float => self.write_value(value.to_float()),
+            ValueType::Double32 | ValueType::Double64 => self.write_value(value.to_double()),
             ValueType::String => self.write_value(value.to_str()),
             ValueType::Data => self.write_value(value.to_data()),
             ValueType::Array => {

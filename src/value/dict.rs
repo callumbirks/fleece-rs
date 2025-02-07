@@ -9,7 +9,7 @@ use super::{array, ValueType};
 use crate::alloced::AllocedDict;
 use crate::scope::Scope;
 use crate::value::{self, Result, Value};
-use crate::SharedKeys;
+use crate::{MutableDict, SharedKeys};
 
 // A Dict is just an Array, but the elements are alternating key, value
 #[repr(transparent)]
@@ -61,6 +61,11 @@ impl Dict {
     #[inline]
     pub(crate) fn from_value(value: &Value) -> &Self {
         unsafe { core::mem::transmute(value) }
+    }
+
+    #[must_use]
+    pub fn to_mutable(&self) -> MutableDict {
+        MutableDict::clone_from(self)
     }
 
     /// Returns true if this dict contains the given key.

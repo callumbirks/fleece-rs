@@ -1,5 +1,5 @@
 use alloc::{
-    collections::{btree_map, BTreeMap, BTreeSet},
+    collections::{btree_map, BTreeMap},
     string::{String, ToString},
     sync::Arc,
 };
@@ -16,7 +16,6 @@ use super::{MutableArray, ValueSlot};
 #[derive(Debug)]
 pub struct MutableDict {
     map: BTreeMap<Key, ValueSlot>,
-    allocated_values: BTreeSet<AllocedValue>,
     shared_keys: Option<Arc<SharedKeys>>,
 }
 
@@ -60,8 +59,9 @@ impl MutableDict {
             shared_keys,
             ..Default::default()
         };
+        let is_wide = source.is_wide();
         for (k, v) in source {
-            let slot = super::encode_fleece(&mut this.allocated_values, v, source.is_wide());
+            let slot = ValueSlot::new_from_fleece(v, is_wide);
             let key = this.encode_key(k);
             this.map.insert(key, slot);
         }
@@ -126,39 +126,27 @@ impl MutableDict {
         T: Encodable,
     {
         let encoded_key = self.encode_key(key);
-        let value = super::encode(&mut self.allocated_values, value);
-        if let Some(previous) = self.map.insert(encoded_key, value) {
-            self.drop_if_allocated(previous);
-        }
+        let slot = ValueSlot::new(value);
+        self.map.insert(encoded_key, slot);
     }
 
-    /// Set a key in the dictionary to the given [`MutableDict`]. This inserts if it doesn't exist, or updates if it does.
-    pub fn insert_dict(&mut self, key: &str, dict: MutableDict) {
+    /// Set a key in the dictionary to the given dict. This inserts if it doesn't exist, or updates if it does.
+    pub fn insert_dict(&mut self, key: &str, dict: impl Into<MutableDict>) {
         let encoded_key = self.encode_key(key);
-        if let Some(previous) = self
-            .map
-            .insert(encoded_key.clone(), ValueSlot::new_dict(dict))
-        {
-            self.drop_if_allocated(previous);
-        }
+        self.map
+            .insert(encoded_key.clone(), ValueSlot::new_dict(dict.into()));
     }
 
-    /// Set a key in the dictionary to the given [`MutableArray`]. This inserts if it doesn't exist, or updates if it does.
-    pub fn insert_array(&mut self, key: &str, array: MutableArray) {
+    /// Set a key in the dictionary to the given array. This inserts if it doesn't exist, or updates if it does.
+    pub fn insert_array(&mut self, key: &str, array: impl Into<MutableArray>) {
         let encoded_key = self.encode_key(key);
-        if let Some(previous) = self
-            .map
-            .insert(encoded_key.clone(), ValueSlot::new_array(array))
-        {
-            self.drop_if_allocated(previous);
-        }
+        self.map
+            .insert(encoded_key.clone(), ValueSlot::new_array(array.into()));
     }
 
     pub fn remove(&mut self, key: &str) {
         let encoded_key = self.encode_key(key);
-        if let Some(previous) = self.map.remove(&encoded_key) {
-            self.drop_if_allocated(previous);
-        }
+        self.map.remove(&encoded_key);
     }
 
     #[must_use]
@@ -173,16 +161,6 @@ impl MutableDict {
             .as_ref()
             .and_then(|sk| sk.encode(key))
             .map_or_else(|| Key::String(key.to_string()), Key::Shared)
-    }
-
-    /// If the given [`ValueSlot`] is a [`ValueSlot::Pointer`], remove its allocated backing from
-    /// `allocated_values`.
-    /// Consumes the slot because otherwise we could be leaving a dangling pointer around.
-    fn drop_if_allocated(&mut self, slot: ValueSlot) {
-        if let Some(pointer) = slot.pointer() {
-            self.allocated_values.remove(&pointer);
-        }
-        core::mem::drop(slot);
     }
 }
 
@@ -210,7 +188,7 @@ impl<'a> Ref<'a> {
 
     #[must_use]
     pub fn is_value(&self) -> bool {
-        self.slot.is_inline() || self.slot.is_pointer()
+        self.slot.is_value()
     }
 
     #[must_use]
@@ -285,7 +263,6 @@ impl Default for MutableDict {
     fn default() -> Self {
         Self {
             map: BTreeMap::default(),
-            allocated_values: BTreeSet::default(),
             shared_keys: None,
         }
     }
@@ -298,13 +275,7 @@ impl Clone for MutableDict {
             ..Default::default()
         };
         for (k, v) in &self.map {
-            let slot = match v {
-                ValueSlot::Pointer(_) | ValueSlot::Inline(_) => {
-                    super::encode_fleece(&mut new.allocated_values, v.value().unwrap(), false)
-                }
-                ValueSlot::MutableArray(arr) => ValueSlot::MutableArray(arr.clone()),
-                ValueSlot::MutableDict(dict) => ValueSlot::MutableDict(dict.clone()),
-            };
+            let slot = v.clone();
             new.map.insert(k.clone(), slot);
         }
         new

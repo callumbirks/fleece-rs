@@ -1,6 +1,5 @@
 use core::ops::Index;
 
-use alloc::collections::BTreeSet;
 use alloc::vec::Vec;
 
 use crate::{
@@ -11,10 +10,9 @@ use crate::{
 
 use super::{MutableDict, ValueSlot};
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct MutableArray {
     list: Vec<ValueSlot>,
-    allocated_values: BTreeSet<AllocedValue>,
 }
 
 impl MutableArray {
@@ -27,8 +25,9 @@ impl MutableArray {
     #[must_use]
     pub fn clone_from(source: &Array) -> Self {
         let mut this = Self::new();
+        let is_wide = source.is_wide();
         for v in source {
-            let slot = super::encode_fleece(&mut this.allocated_values, v, source.is_wide());
+            let slot = ValueSlot::new_from_fleece(v, is_wide);
             this.list.push(slot);
         }
         this
@@ -83,20 +82,22 @@ impl MutableArray {
     where
         T: Encodable,
     {
-        let slot = super::encode(&mut self.allocated_values, value);
+        let slot = ValueSlot::new(value);
         self.replace(index, slot);
     }
 
-    pub fn set_array(&mut self, index: usize, array: MutableArray) {
-        self.replace(index, ValueSlot::new_array(array));
+    /// Set the entry at `index` to the given array.
+    pub fn set_array(&mut self, index: usize, array: impl Into<MutableArray>) {
+        self.replace(index, ValueSlot::new_array(array.into()));
     }
 
-    pub fn set_dict(&mut self, index: usize, dict: MutableDict) {
-        self.replace(index, ValueSlot::new_dict(dict));
+    /// Set the entry at `index` to the given array.
+    pub fn set_dict(&mut self, index: usize, dict: impl Into<MutableDict>) {
+        self.replace(index, ValueSlot::new_dict(dict.into()));
     }
 
     pub fn set_fleece(&mut self, index: usize, value: &Value) {
-        let slot = super::encode_fleece(&mut self.allocated_values, value, false);
+        let slot = ValueSlot::new_from_fleece(value, false);
         self.replace(index, slot);
     }
 
@@ -104,12 +105,12 @@ impl MutableArray {
     where
         T: Encodable + ?Sized,
     {
-        let slot = super::encode(&mut self.allocated_values, value);
+        let slot = ValueSlot::new(value);
         self.list.push(slot);
     }
 
     pub fn push_fleece(&mut self, value: &Value) {
-        let slot = super::encode_fleece(&mut self.allocated_values, value, false);
+        let slot = ValueSlot::new_from_fleece(value, false);
         self.list.push(slot);
     }
 
@@ -118,8 +119,7 @@ impl MutableArray {
             return;
         }
         // Remove elem at `index` from the new list.
-        let slot = self.list.remove(index);
-        self.drop_if_allocated(slot);
+        self.list.remove(index);
     }
 
     #[must_use]
@@ -129,18 +129,7 @@ impl MutableArray {
 
     #[inline]
     fn replace(&mut self, index: usize, slot: ValueSlot) {
-        let prev = core::mem::replace(&mut self.list[index], slot);
-        self.drop_if_allocated(prev);
-    }
-
-    /// If the given [`ValueSlot`] is a [`ValueSlot::Pointer`], remove its allocated backing from
-    /// `allocated_values`.
-    /// Consumes the slot because otherwise we could be leaving a dangling pointer around.
-    fn drop_if_allocated(&mut self, slot: ValueSlot) {
-        if let Some(pointer) = slot.pointer() {
-            self.allocated_values.remove(&pointer);
-        }
-        core::mem::drop(slot);
+        let _ = core::mem::replace(&mut self.list[index], slot);
     }
 }
 
@@ -163,7 +152,7 @@ impl<'a> Ref<'a> {
 
     #[must_use]
     pub fn is_value(&self) -> bool {
-        self.slot.is_inline() || self.slot.is_pointer()
+        self.slot.is_value()
     }
 
     #[must_use]
@@ -221,23 +210,6 @@ impl<'a> IntoIterator for &'a MutableArray {
             arr: self,
             index: 0,
         }
-    }
-}
-
-impl Clone for MutableArray {
-    fn clone(&self) -> Self {
-        let mut new = Self::default();
-        for v in &self.list {
-            let slot = match v {
-                ValueSlot::Pointer(_) | ValueSlot::Inline(_) => {
-                    super::encode_fleece(&mut new.allocated_values, v.value().unwrap(), false)
-                }
-                ValueSlot::MutableArray(arr) => ValueSlot::MutableArray(arr.clone()),
-                ValueSlot::MutableDict(dict) => ValueSlot::MutableDict(dict.clone()),
-            };
-            new.list.push(slot);
-        }
-        new
     }
 }
 

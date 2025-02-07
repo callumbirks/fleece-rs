@@ -1,13 +1,12 @@
-use mutable::{MutableArray, MutableDict};
+extern crate std;
+use std::{fs::OpenOptions, io::Write};
 
-use crate::encoder::Encoder;
-use crate::value::{varint, ValueType};
-use std::collections::BTreeSet;
-use std::fs::OpenOptions;
-use std::io::Write;
-use std::sync::Arc;
+use alloc::{collections::BTreeSet, sync::Arc};
 
-use super::*;
+use crate::{
+    alloced::{AllocedArray, AllocedDict},
+    encoder, fleece, Encoder, MutableArray, MutableDict, SharedKeys, Value, ValueType,
+};
 
 const PERSON_ENCODED: &[u8] = include_bytes!("../1person.fleece");
 const PEOPLE_ENCODED: &[u8] = include_bytes!("../1000people.fleece");
@@ -68,23 +67,6 @@ fn decode_people_checks(people: &Value) {
             "Expected index to be the same as the array index!"
         );
     }
-}
-
-fn varint_test(val: u64) {
-    let size_required = varint::size_required(val);
-    let mut buf: Vec<u8> = vec![0; size_required];
-    let _written = varint::write(&mut buf, val);
-    println!("Wrote varint {:02x?}", &buf);
-    let (_read, out_val) = varint::read(&buf);
-    assert_eq!(val, out_val);
-}
-
-#[test]
-fn varint() {
-    varint_test(8_704_268);
-    varint_test(100_000);
-    varint_test(603);
-    varint_test(87);
 }
 
 #[test]
@@ -283,7 +265,7 @@ fn mutable_array() {
     }
 
     array.push("Seven");
-    assert!(array[array.len() - 1].to_str() == "Seven");
+    assert_eq!(array[array.len() - 1].to_str(), "Seven");
     array.remove(2);
     assert_eq!(array[2].to_str(), "Three");
     assert_eq!(array.len(), 7);
@@ -295,19 +277,15 @@ fn mutable_array() {
 
 #[test]
 fn nested_mutable_dict() {
-    let mut encoder = Encoder::new();
-    encoder.begin_dict().unwrap();
-    encoder.write_key("name").unwrap();
-    encoder.write_value("Jeff").unwrap();
-    encoder.write_key("contact").unwrap();
-    encoder.begin_dict().unwrap();
-    encoder.write_key("email").unwrap();
-    encoder.write_value("contact@jeffbaggins.com").unwrap();
-    encoder.write_key("phone_number").unwrap();
-    encoder.write_value("+1 234 56789").unwrap();
-    encoder.end_dict().unwrap();
-    encoder.end_dict().unwrap();
-    let dict = encoder.finish_value().to_dict().unwrap();
+    let dict: AllocedDict = fleece! {
+        "name": "Jeff",
+        "age": 35,
+        "height": 166.5,
+        "contact": {
+            "email": "contact@jeffbaggins.com",
+            "phone_number": "+1 234 56789",
+        },
+    };
 
     let mut dict = MutableDict::from(dict);
     let contact_dict = dict.get_dict("contact").unwrap();
@@ -318,29 +296,21 @@ fn nested_mutable_dict() {
     contact_dict.insert("Address", "3250 Olcott St");
     assert_eq!(contact_dict["Address"].to_str(), "3250 Olcott St");
 
-    let mut email = MutableArray::new();
-    email.push_fleece(&contact_dict["email"]);
-    email.push("jeff.baggins@example.com");
+    let email = fleece![
+        (&contact_dict["email"].to_str()),
+        "jeff.baggins@example.com",
+    ];
     dict.insert_array("email", email);
 
     let email = dict.get_array("email").unwrap();
+    println!("email: {:?}", email);
     assert_eq!(email[0].to_str(), "contact@jeffbaggins.com");
     assert_eq!(email[1].to_str(), "jeff.baggins@example.com");
 }
 
 #[test]
 fn nested_mutable_array() {
-    let mut encoder = Encoder::new();
-    encoder.begin_array(10).unwrap();
-    encoder.write_value(&23).unwrap();
-    encoder.begin_dict().unwrap();
-    encoder.write_key("name").unwrap();
-    encoder.write_value("Jeff").unwrap();
-    encoder.write_key("age").unwrap();
-    encoder.write_value(&35).unwrap();
-    encoder.end_dict().unwrap();
-    encoder.end_array().unwrap();
-    let array = encoder.finish_value().to_array().unwrap();
+    let array: AllocedArray = fleece![23, {"name": "Jeff", "age": 35}];
 
     println!("NESTED MUTABLE ARRAY: {:?}", &array);
 
