@@ -103,6 +103,102 @@ impl Encodable for u64 {
     }
 }
 
+impl super::private::Sealed for isize {}
+impl Encodable for isize {
+    fn write_fleece_to(&self, buf: &mut [u8], is_wide: bool) -> Option<NonZeroUsize> {
+        #[cfg(target_pointer_width = "64")]
+        {
+            (*self as i64).write_fleece_to(buf, is_wide)
+        }
+        #[cfg(target_pointer_width = "32")]
+        {
+            (*self as i32).write_fleece_to(buf, is_wide)
+        }
+        #[cfg(target_pointer_width = "16")]
+        {
+            (*self as i16).write_fleece_to(buf, is_wide)
+        }
+    }
+
+    fn fleece_size(&self) -> usize {
+        #[cfg(target_pointer_width = "64")]
+        {
+            (*self as i64).fleece_size()
+        }
+        #[cfg(target_pointer_width = "32")]
+        {
+            (*self as i32).fleece_size()
+        }
+        #[cfg(target_pointer_width = "16")]
+        {
+            (*self as i16).fleece_size()
+        }
+    }
+
+    fn to_sized_value(&self) -> Option<SizedValue> {
+        #[cfg(target_pointer_width = "64")]
+        {
+            (*self as i64).to_sized_value()
+        }
+        #[cfg(target_pointer_width = "32")]
+        {
+            (*self as i32).to_sized_value()
+        }
+        #[cfg(target_pointer_width = "16")]
+        {
+            (*self as i16).to_sized_value()
+        }
+    }
+}
+
+impl super::private::Sealed for usize {}
+impl Encodable for usize {
+    fn write_fleece_to(&self, buf: &mut [u8], is_wide: bool) -> Option<NonZeroUsize> {
+        #[cfg(target_pointer_width = "64")]
+        {
+            (*self as u64).write_fleece_to(buf, is_wide)
+        }
+        #[cfg(target_pointer_width = "32")]
+        {
+            (*self as u32).write_fleece_to(buf, is_wide)
+        }
+        #[cfg(target_pointer_width = "16")]
+        {
+            (*self as u16).write_fleece_to(buf, is_wide)
+        }
+    }
+
+    fn fleece_size(&self) -> usize {
+        #[cfg(target_pointer_width = "64")]
+        {
+            (*self as u64).fleece_size()
+        }
+        #[cfg(target_pointer_width = "32")]
+        {
+            (*self as u32).fleece_size()
+        }
+        #[cfg(target_pointer_width = "16")]
+        {
+            (*self as u16).fleece_size()
+        }
+    }
+
+    fn to_sized_value(&self) -> Option<SizedValue> {
+        #[cfg(target_pointer_width = "64")]
+        {
+            (*self as u64).to_sized_value()
+        }
+        #[cfg(target_pointer_width = "32")]
+        {
+            (*self as u32).to_sized_value()
+        }
+        #[cfg(target_pointer_width = "16")]
+        {
+            (*self as u16).to_sized_value()
+        }
+    }
+}
+
 impl super::private::Sealed for i32 {}
 impl Encodable for i32 {
     fn write_fleece_to(&self, buf: &mut [u8], is_wide: bool) -> Option<NonZeroUsize> {
