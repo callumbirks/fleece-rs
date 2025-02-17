@@ -108,7 +108,7 @@ fn encode_people() {
 fn encoder_multiple_top_level_collections() {
     let mut encoder = Encoder::new();
     encoder.begin_array(1).unwrap();
-    encoder.write_value(&42).unwrap();
+    encoder.write_value(42).unwrap();
     encoder.end_array().unwrap();
     assert!(matches!(
         encoder.begin_array(1),
@@ -303,7 +303,6 @@ fn nested_mutable_dict() {
     dict.insert_array("email", email);
 
     let email = dict.get_array("email").unwrap();
-    println!("email: {:?}", email);
     assert_eq!(email[0].to_str(), "contact@jeffbaggins.com");
     assert_eq!(email[1].to_str(), "jeff.baggins@example.com");
 }

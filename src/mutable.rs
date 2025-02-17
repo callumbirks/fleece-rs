@@ -1,7 +1,7 @@
 pub mod array;
 pub mod dict;
 
-use alloc::{boxed::Box, collections::BTreeSet, sync::Arc, vec::Vec};
+use alloc::boxed::Box;
 
 pub use array::MutableArray;
 pub use dict::MutableDict;
@@ -33,7 +33,7 @@ impl ValueSlot {
         } else {
             let mut buf: Box<[u8]> = core::iter::repeat(0u8).take(value.fleece_size()).collect();
             value.write_fleece_to(&mut buf, false);
-            Self::Pointer(unsafe { core::mem::transmute(buf) })
+            Self::Pointer(unsafe { core::mem::transmute::<Box<[u8]>, Box<Value>>(buf) })
         }
     }
 
@@ -133,12 +133,6 @@ impl ValueSlot {
         i[1] = value::constants::UNDEFINED[1];
         Self::Inline(i)
     }
-
-    #[cold]
-    #[inline(never)]
-    fn pointer_overflow_panic() -> ! {
-        panic!("Overflow for Value len in `ValueSlot::new_pointer`");
-    }
 }
 
 impl Clone for ValueSlot {
@@ -148,7 +142,7 @@ impl Clone for ValueSlot {
             ValueSlot::Pointer(p) => {
                 let mut buf: Box<[u8]> = core::iter::repeat(0u8).take(p.len()).collect();
                 buf.copy_from_slice(&p.bytes);
-                ValueSlot::Pointer(unsafe { core::mem::transmute(buf) })
+                ValueSlot::Pointer(unsafe { core::mem::transmute::<Box<[u8]>, Box<Value>>(buf) })
             }
             ValueSlot::MutableArray(arr) => ValueSlot::MutableArray(arr.clone()),
             ValueSlot::MutableDict(dict) => ValueSlot::MutableDict(dict.clone()),

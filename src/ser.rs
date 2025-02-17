@@ -101,47 +101,47 @@ impl<'ser> serde::Serializer for &'ser mut Serializer {
     type SerializeStructVariant = Self;
 
     fn serialize_bool(self, v: bool) -> Result<Self::Ok> {
-        self.encoder.write_value(&v).map_err(Error::Encode)
+        self.encoder.write_value(v).map_err(Error::Encode)
     }
 
     fn serialize_i8(self, v: i8) -> Result<Self::Ok> {
-        self.encoder.write_value(&v).map_err(Error::Encode)
+        self.encoder.write_value(v).map_err(Error::Encode)
     }
 
     fn serialize_i16(self, v: i16) -> Result<Self::Ok> {
-        self.encoder.write_value(&v).map_err(Error::Encode)
+        self.encoder.write_value(v).map_err(Error::Encode)
     }
 
     fn serialize_i32(self, v: i32) -> Result<Self::Ok> {
-        self.encoder.write_value(&v).map_err(Error::Encode)
+        self.encoder.write_value(v).map_err(Error::Encode)
     }
 
     fn serialize_i64(self, v: i64) -> Result<Self::Ok> {
-        self.encoder.write_value(&v).map_err(Error::Encode)
+        self.encoder.write_value(v).map_err(Error::Encode)
     }
 
     fn serialize_u8(self, v: u8) -> Result<Self::Ok> {
-        self.encoder.write_value(&v).map_err(Error::Encode)
+        self.encoder.write_value(v).map_err(Error::Encode)
     }
 
     fn serialize_u16(self, v: u16) -> Result<Self::Ok> {
-        self.encoder.write_value(&v).map_err(Error::Encode)
+        self.encoder.write_value(v).map_err(Error::Encode)
     }
 
     fn serialize_u32(self, v: u32) -> Result<Self::Ok> {
-        self.encoder.write_value(&v).map_err(Error::Encode)
+        self.encoder.write_value(v).map_err(Error::Encode)
     }
 
     fn serialize_u64(self, v: u64) -> Result<Self::Ok> {
-        self.encoder.write_value(&v).map_err(Error::Encode)
+        self.encoder.write_value(v).map_err(Error::Encode)
     }
 
     fn serialize_f32(self, v: f32) -> Result<Self::Ok> {
-        self.encoder.write_value(&v).map_err(Error::Encode)
+        self.encoder.write_value(v).map_err(Error::Encode)
     }
 
     fn serialize_f64(self, v: f64) -> Result<Self::Ok> {
-        self.encoder.write_value(&v).map_err(Error::Encode)
+        self.encoder.write_value(v).map_err(Error::Encode)
     }
 
     fn serialize_char(self, v: char) -> Result<Self::Ok> {

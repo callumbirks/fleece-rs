@@ -43,56 +43,66 @@ pub use value::ValueType;
 macro_rules! fleece {
     {
         $($key:literal: $val:tt),* $(,)?
-    } => {unsafe {
+    } => {{
         let mut encoder = Encoder::new();
-        encoder.begin_dict().unwrap_unchecked();
+        unsafe { encoder.begin_dict().unwrap_unchecked() };
         $(fleece!(insert encoder => $key: $val);)*
-        encoder.end_dict().unwrap_unchecked();
-        encoder.finish_value().to_dict().unwrap()
+        unsafe { encoder.end_dict().unwrap_unchecked() };
+        unsafe { encoder.finish_value().to_dict().unwrap_unchecked() }
     }};
 
     [
         $($val:tt),* $(,)?
-    ] => {unsafe {
+    ] => {{
         let mut encoder = Encoder::new();
-        encoder.begin_array(10).unwrap_unchecked();
+        unsafe { encoder.begin_array(10).unwrap_unchecked() };
         $(fleece!(push encoder => $val);)*
-        encoder.end_array().unwrap_unchecked();
-        encoder.finish_value().to_array().unwrap_unchecked()
+        unsafe { encoder.end_array().unwrap_unchecked() };
+        unsafe { encoder.finish_value().to_array().unwrap_unchecked() }
     }};
 
     (insert $encoder:expr => $key:literal: { $($inner_key:literal: $inner_val:tt),*$(,)? }) => {
-        $encoder.write_key($key).unwrap_unchecked();
-        $encoder.begin_dict().unwrap_unchecked();
+        let Ok(_) = $encoder.write_key($key) else {
+            unsafe { core::hint::unreachable_unchecked() }
+        };
+        unsafe { $encoder.begin_dict().unwrap_unchecked() };
         $(fleece!(insert $encoder => $inner_key: $inner_val);)*
-        $encoder.end_dict().unwrap_unchecked();
+        unsafe { $encoder.end_dict().unwrap_unchecked() };
     };
 
     (insert $encoder:expr => $key:literal: [ $($inner_val:tt),* $(,)? ]) => {
-        $encoder.write_key($key).unwrap_unchecked();
-        $encoder.begin_array(10).unwrap_unchecked();
+        let Ok(_) = $encoder.write_key($key) else {
+            unsafe { core::hint::unreachable_unchecked() }
+        };
+        unsafe { $encoder.begin_array(10).unwrap_unchecked() };
         $(fleece!(push $encoder => $inner_val);)*
-        $encoder.end_array().unwrap_unchecked();
+        unsafe { $encoder.end_array().unwrap_unchecked() };
     };
 
     (insert $encoder:expr => $key:literal: $val:expr) => {
-        $encoder.write_key($key).unwrap_unchecked();
-        $encoder.write_value($val).unwrap_unchecked();
+        let Ok(_) = $encoder.write_key($key) else {
+            unsafe { core::hint::unreachable_unchecked() }
+        };
+        let Ok(_) = $encoder.write_value($val) else {
+            unsafe { core::hint::unreachable_unchecked() }
+        };
     };
 
     (push $encoder:expr => { $($inner_key:literal: $inner_val:tt),* $(,)? }) => {
-        $encoder.begin_dict().unwrap_unchecked();
+        unsafe { $encoder.begin_dict().unwrap_unchecked() };
         $(fleece!(insert $encoder => $inner_key: $inner_val);)*
-        $encoder.end_dict().unwrap_unchecked();
+        unsafe { $encoder.end_dict().unwrap_unchecked() };
     };
 
     (push $encoder:expr => [ $($inner_val:tt),* $(,)? ]) => {
-        $encoder.begin_array().unwrap_unchecked();
+        unsafe { $encoder.begin_array().unwrap_unchecked() };
         $(fleece!(push $encoder => $inner_val);)*
-        $encoder.end_array().unwrap_unchecked();
+        unsafe { $encoder.end_array().unwrap_unchecked() };
     };
 
     (push $encoder:expr => $val:expr) => {
-        $encoder.write_value($val).unwrap_unchecked();
+        let Ok(_) = $encoder.write_value($val) else {
+            unsafe { core::hint::unreachable_unchecked() }
+        };
     };
 }
